@@ -519,6 +519,7 @@
             <select id="pStatusFilter" onchange="loadPartnerships()">
               <option value="upcoming">Upcoming</option>
               <option value="past">Past</option>
+              <option value="overdue">Overdue</option>
               <option value="cancelled">Cancelled</option>
               <option value="all">All</option>
             </select>
@@ -569,10 +570,11 @@
     </div>
   </div>
 
-  <!-- ===================== NEW PARTNERSHIP MODAL ===================== -->
+  <!-- ===================== NEW / EDIT PARTNERSHIP MODAL ===================== -->
   <div class="modal-overlay" id="partnershipModal">
     <div class="modal modal-wide">
-      <h3>New Partnership</h3>
+      <h3 id="partnershipModalTitle">New Partnership</h3>
+      <input type="hidden" id="npPartnershipId">
 
       <div class="field-label">Content creator *</div>
       <select class="input" id="npCreator"></select>
@@ -580,7 +582,7 @@
       <div class="modal-grid" style="margin-top:6px;">
         <div>
           <div class="field-label">Spa branch *</div>
-          <select class="input" id="npBranch"></select>
+          <select class="input" id="npBranch" onchange="onPartnershipBranchChange()"></select>
         </div>
         <div>
           <div class="field-label">Number of people *</div>
@@ -597,7 +599,9 @@
       </div>
 
       <div class="field-label">Benefits package — select what's included *</div>
-      <div class="checklist" id="npBenefitsList"></div>
+      <div class="checklist" id="npBenefitsList">
+        <div class="empty-state" style="padding:20px;">Select a spa branch first.</div>
+      </div>
 
       <div class="field-label">Content package</div>
       <div class="content-package-row">
@@ -613,6 +617,18 @@
         <input type="number" class="input qty-input" id="npStoryQty" min="1" step="1" placeholder="Qty" disabled>
       </div>
 
+      <div class="field-label">Upload to platform — raw content required *</div>
+      <div class="modal-grid">
+        <div>
+          <div class="field-label" style="margin-top:0;">Photos to upload</div>
+          <input type="number" class="input" id="npRequiredPhotos" min="0" max="20" step="1" value="5">
+        </div>
+        <div>
+          <div class="field-label" style="margin-top:0;">Videos to upload</div>
+          <input type="number" class="input" id="npRequiredVideos" min="0" max="20" step="1" value="3">
+        </div>
+      </div>
+
       <div class="field-label">Upload deadline *</div>
       <select class="input" id="npDeadline">
         <option value="">Select...</option>
@@ -623,7 +639,7 @@
 
       <div class="msg error" id="npMsg"></div>
       <div class="modal-actions">
-        <button class="btn" id="npSaveBtn" onclick="handleCreatePartnership()">Send to Creator</button>
+        <button class="btn" id="npSaveBtn" onclick="handleSavePartnership()">Send to Creator</button>
         <button class="btn btn-secondary" onclick="closePartnershipModal()">Cancel</button>
       </div>
     </div>
@@ -672,6 +688,15 @@
       <input type="text" class="input" id="bfTreatment" placeholder="e.g. Swedish Massage">
       <div class="field-label">Duration *</div>
       <input type="text" class="input" id="bfDuration" placeholder="e.g. 60 minutes">
+      <div class="field-label">Belongs to activity *</div>
+      <select class="input" id="bfActivityType">
+        <option value="">Select...</option>
+        <option value="Swedish Massage">Swedish Massage</option>
+        <option value="Reflexology">Reflexology</option>
+        <option value="Pool Area">Pool Area</option>
+        <option value="Jacuzzi">Jacuzzi</option>
+        <option value="Sauna">Sauna</option>
+      </select>
       <div class="field-label">Status</div>
       <select class="input" id="bfStatus">
         <option value="Active">Active</option>
@@ -724,13 +749,13 @@
       <div class="field-label">Photos</div>
       <div class="upload-drop">
         <input type="file" id="uploadImagesInput" accept="image/*" multiple>
-        <div class="upload-hint">Up to 5 photos per partnership</div>
+        <div class="upload-hint" id="uploadImagesHint">Photos required for this partnership</div>
       </div>
 
       <div class="field-label">Videos</div>
       <div class="upload-drop">
         <input type="file" id="uploadVideosInput" accept="video/*" multiple>
-        <div class="upload-hint">Up to 3 videos per partnership. Large videos may take a while to upload.</div>
+        <div class="upload-hint" id="uploadVideosHint">Videos required for this partnership. Large videos may take a while to upload.</div>
       </div>
 
       <div class="upload-progress-list" id="uploadProgressList"></div>
@@ -738,6 +763,41 @@
       <div class="modal-actions">
         <button class="btn" id="uploadSaveBtn" onclick="handleUploadContent()">Upload</button>
         <button class="btn btn-secondary" onclick="closeUploadModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== EXPERIENCE FEEDBACK MODAL ===================== -->
+  <div class="modal-overlay" id="experienceModal">
+    <div class="modal">
+      <h3>Share Your Experience</h3>
+      <input type="hidden" id="expPartnershipId">
+
+      <div class="field-label">How did you feel during the visit? (1 = not great, 5 = amazing) *</div>
+      <select class="input" id="expFeeling">
+        <option value="">Select...</option>
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+      </select>
+
+      <div class="field-label">Overall experience (1-5) *</div>
+      <select class="input" id="expOverall">
+        <option value="">Select...</option>
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+      </select>
+
+      <div class="field-label">Satisfaction with the spa branch (1-5) *</div>
+      <select class="input" id="expSatisfaction">
+        <option value="">Select...</option>
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+      </select>
+
+      <div class="field-label">Tell us more about your experience</div>
+      <textarea class="input" id="expNotes" placeholder="Anything you'd like to share..."></textarea>
+
+      <div class="msg error" id="expMsg"></div>
+      <div class="modal-actions">
+        <button class="btn" id="expSaveBtn" onclick="handleSaveExperience()">Submit</button>
+        <button class="btn btn-secondary" onclick="closeExperienceModal()">Close</button>
       </div>
     </div>
   </div>
@@ -779,6 +839,13 @@
         <div class="full">
           <div class="field-label">YouTube link</div>
           <input type="text" class="input" id="fYoutube" placeholder="https://youtube.com/...">
+        </div>
+        <div class="full">
+          <div class="field-label">Status</div>
+          <select class="input" id="fStatus">
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+          </select>
         </div>
       </div>
       <div class="msg error" id="modalMsg"></div>
