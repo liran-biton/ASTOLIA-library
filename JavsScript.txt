@@ -163,6 +163,10 @@
     if (tab === 'experiences') {
       loadExperiences();
     }
+    if (tab === 'library') {
+      loadLibraryFilterOptions();
+      loadLibrary();
+    }
   }
 
   /* ------------------------- DIGITAL CREATOR ------------------------ */
@@ -388,9 +392,14 @@
       if (it.canApprove) {
         actions += '<button class="edit-btn" onclick=\'openApproveModal(' + JSON.stringify(it).replace(/'/g, "&#39;") + ')\'>Review &amp; Approve</button>';
       }
+      if (it.canUploadContent) {
+        actions += '<button class="edit-btn" onclick=\'openUploadModal(' + JSON.stringify(it).replace(/'/g, "&#39;") + ')\'>Upload Content</button>';
+      }
       if (it.canCancel) {
         actions += '<button class="edit-btn" style="color:var(--danger);margin-left:12px;" onclick="handleCancelPartnership(\'' + it.id + '\')">Cancel</button>';
       }
+
+      const showContentProgress = it.status === 'Approved';
 
       return '' +
         '<div class="creator-card">' +
@@ -406,6 +415,7 @@
           (contentTags.length ? '<div class="tag-row">' + contentTags.map(c => '<span class="tag">' + escapeHtml(c) + '</span>').join('') + '</div>' : '') +
           (it.status === 'Cancelled' && it.cancelledBy ? '<div class="info-row"><span>Cancelled by</span><span>' + escapeHtml(it.cancelledBy) + '</span></div>' : '') +
           (it.status === 'Approved' && it.pregnancyDeclaration ? '<div class="info-row"><span>Pregnancy declaration</span><span>' + escapeHtml(it.pregnancyDeclaration) + '</span></div>' : '') +
+          (showContentProgress ? '<div class="content-progress">Content uploaded: <b>' + it.contentImages + '/' + it.maxImages + '</b> photos, <b>' + it.contentVideos + '/' + it.maxVideos + '</b> videos</div>' : '') +
           (actions ? '<div class="card-footer">' + actions + '</div>' : '') +
         '</div>';
     }).join('');
@@ -669,6 +679,82 @@
     });
   }
 
+  /* ------------------------- THE LIBRARY ------------------------------ */
+
+  function loadLibraryFilterOptions() {
+    callServer('getLibraryFilterOptions', currentToken).then(opts => {
+      opts = opts || {};
+      const creators = Array.isArray(opts.creators) ? opts.creators : [];
+      const branches = Array.isArray(opts.branches) ? opts.branches : [];
+
+      const creatorSel = document.getElementById('libCreatorFilter');
+      const currentCreator = creatorSel.value;
+      creatorSel.innerHTML = '<option value="">All creators</option>' +
+        creators.map(c => '<option value="' + escapeHtml(c.email) + '">' + escapeHtml(c.name) + '</option>').join('');
+      creatorSel.value = currentCreator;
+
+      const branchSel = document.getElementById('libBranchFilter');
+      const currentBranch = branchSel.value;
+      branchSel.innerHTML = '<option value="">All spa branches</option>' +
+        branches.map(b => '<option value="' + escapeHtml(b.id) + '">' + escapeHtml(b.name) + '</option>').join('');
+      branchSel.value = currentBranch;
+    }).catch(() => {});
+  }
+
+  function clearLibraryFilters() {
+    document.getElementById('libCreatorFilter').value = '';
+    document.getElementById('libTypeFilter').value = '';
+    document.getElementById('libBranchFilter').value = '';
+    document.getElementById('libDateFilter').value = '';
+    loadLibrary();
+  }
+
+  function loadLibrary() {
+    const grid = document.getElementById('libraryGrid');
+    grid.innerHTML = '<div class="empty-state">Loading library...</div>';
+
+    const filters = {
+      creatorEmail: document.getElementById('libCreatorFilter').value,
+      contentType: document.getElementById('libTypeFilter').value,
+      branchId: document.getElementById('libBranchFilter').value,
+      date: document.getElementById('libDateFilter').value
+    };
+
+    callServer('getLibraryContent', currentToken, filters)
+      .then(items => {
+        items = Array.isArray(items) ? items : [];
+        if (!items.length) {
+          grid.innerHTML = '<div class="empty-state">No content found for these filters.</div>';
+          return;
+        }
+
+        grid.innerHTML = items.map(it => {
+          const media = it.contentType === 'Image'
+            ? '<div class="media-thumb-wrap">' +
+                '<span class="media-type-tag">Photo</span>' +
+                '<img class="media-thumb" src="' + escapeAttr(it.thumbUrl) + '" alt="' + escapeHtml(it.fileName) + '" loading="lazy">' +
+              '</div>'
+            : '<div class="media-thumb-wrap">' +
+                '<span class="media-type-tag">Video</span>' +
+                '<a class="media-video-thumb" href="' + escapeAttr(it.fileUrl) + '" target="_blank">▶</a>' +
+              '</div>';
+
+          return '' +
+            '<div class="creator-card media-card">' +
+              media +
+              '<div class="media-body">' +
+                '<div class="creator-name" style="font-size:14px;">' + escapeHtml(it.creatorName) + '</div>' +
+                '<div class="creator-city">' + escapeHtml(it.branchName) + '</div>' +
+                '<div class="info-row"><span>Visit date</span><span>' + formatDateUS(it.visitDate) + '</span></div>' +
+                '<div class="info-row"><span>Uploaded</span><span>' + formatDateUS(it.uploadedAt) + '</span></div>' +
+                '<div class="card-footer"><a class="edit-btn" href="' + escapeAttr(it.fileUrl) + '" target="_blank">Open in Drive</a></div>' +
+              '</div>' +
+            '</div>';
+        }).join('');
+      })
+      .catch(err => { grid.innerHTML = '<div class="empty-state">' + escapeHtml((err && err.message) ? err.message : 'Could not load the library.') + '</div>'; });
+  }
+
   /* ------------------------- MY EXPERIENCES --------------------------- */
 
   function clearExperienceDate() {
@@ -758,6 +844,97 @@
         btn.textContent = 'Approve Partnership';
         document.getElementById('approveMsg').textContent = (err && err.message) ? err.message : 'Could not approve partnership.';
       });
+  }
+
+  /* ------------------------- UPLOAD CONTENT --------------------------- */
+
+  let uploadTargetPartnershipId = null;
+  let uploadRemainingImages = 0;
+  let uploadRemainingVideos = 0;
+
+  function openUploadModal(item) {
+    uploadTargetPartnershipId = item.id;
+    uploadRemainingImages = Math.max(0, item.maxImages - item.contentImages);
+    uploadRemainingVideos = Math.max(0, item.maxVideos - item.contentVideos);
+
+    document.getElementById('uploadCurrentProgress').innerHTML =
+      'Already uploaded: <b>' + item.contentImages + '/' + item.maxImages + '</b> photos, <b>' + item.contentVideos + '/' + item.maxVideos + '</b> videos';
+    document.getElementById('uploadImagesInput').value = '';
+    document.getElementById('uploadVideosInput').value = '';
+    document.getElementById('uploadProgressList').innerHTML = '';
+    document.getElementById('uploadMsg').textContent = '';
+
+    document.getElementById('uploadModal').classList.add('active');
+  }
+
+  function closeUploadModal() {
+    document.getElementById('uploadModal').classList.remove('active');
+  }
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+      reader.onerror = () => reject(new Error('Could not read file: ' + file.name));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function handleUploadContent() {
+    const imageFiles = Array.from(document.getElementById('uploadImagesInput').files || []);
+    const videoFiles = Array.from(document.getElementById('uploadVideosInput').files || []);
+    const msgEl = document.getElementById('uploadMsg');
+    msgEl.textContent = '';
+
+    if (!imageFiles.length && !videoFiles.length) {
+      msgEl.textContent = 'Please choose at least one photo or video.';
+      return;
+    }
+    if (imageFiles.length > uploadRemainingImages) {
+      msgEl.textContent = 'You can only add ' + uploadRemainingImages + ' more photo(s) for this partnership.';
+      return;
+    }
+    if (videoFiles.length > uploadRemainingVideos) {
+      msgEl.textContent = 'You can only add ' + uploadRemainingVideos + ' more video(s) for this partnership.';
+      return;
+    }
+
+    const MAX_FILE_MB = 25;
+    const tooBig = imageFiles.concat(videoFiles).find(f => f.size > MAX_FILE_MB * 1024 * 1024);
+    if (tooBig) {
+      msgEl.textContent = tooBig.name + ' is larger than ' + MAX_FILE_MB + 'MB — please use a smaller file.';
+      return;
+    }
+
+    const btn = document.getElementById('uploadSaveBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Uploading...';
+    document.getElementById('uploadProgressList').innerHTML = '<div>Preparing files…</div>';
+
+    const allFiles = imageFiles.map(f => ({ file: f, contentType: 'Image' }))
+      .concat(videoFiles.map(f => ({ file: f, contentType: 'Video' })));
+
+    Promise.all(allFiles.map(entry =>
+      fileToBase64(entry.file).then(base64 => ({
+        name: entry.file.name,
+        mimeType: entry.file.type || 'application/octet-stream',
+        contentType: entry.contentType,
+        base64: base64
+      }))
+    )).then(payload => {
+      document.getElementById('uploadProgressList').innerHTML = '<div>Uploading ' + payload.length + ' file(s) to the library…</div>';
+      return callServer('uploadPartnershipContent', currentToken, uploadTargetPartnershipId, payload);
+    }).then(() => {
+      btn.disabled = false;
+      btn.textContent = 'Upload';
+      closeUploadModal();
+      loadExperiences();
+    }).catch(err => {
+      btn.disabled = false;
+      btn.textContent = 'Upload';
+      document.getElementById('uploadProgressList').innerHTML = '';
+      msgEl.textContent = (err && err.message) ? err.message : 'Could not upload content.';
+    });
   }
 
   /* ------------------------- UTILS ----------------------------------- */
