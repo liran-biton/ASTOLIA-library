@@ -338,6 +338,42 @@
     .upload-progress-list{font-size:12.5px;color:var(--text-dark);margin-top:10px;}
     .upload-progress-list div{padding:3px 0;}
 
+    /* AI: stars, mood tags, read-more, multiselect filters */
+    .ai-stars{color:var(--gold);font-size:14px;letter-spacing:1px;}
+    .ai-stars .star-empty{color:var(--sand-line);}
+    .tag-mood{
+      font-size:11px;background:#DCEAE0;border:1px solid #BEDCC9;
+      color:var(--sage-dark);padding:4px 9px;border-radius:20px;font-weight:600;
+    }
+    .ai-text-block{margin-top:6px;}
+    .ai-text-label{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-mute);margin-bottom:2px;}
+    .ai-text-content{
+      font-size:12.5px;color:var(--text-dark);line-height:1.5;
+      display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+    }
+    .ai-text-content.expanded{display:block;-webkit-line-clamp:unset;overflow:visible;}
+    .ai-read-more{
+      border:none;background:none;color:var(--sage-dark);font-size:11.5px;font-weight:700;
+      padding:2px 0;text-decoration:underline;cursor:pointer;
+    }
+
+    .multiselect{position:relative;flex:1;min-width:170px;}
+    .multiselect-btn{
+      width:100%;padding:12px 14px;border:1px solid var(--sand-line);border-radius:10px;
+      background:var(--cream);color:var(--text-dark);text-align:left;font-size:14px;cursor:pointer;
+    }
+    .multiselect-panel{
+      display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:60;
+      background:var(--white);border:1px solid var(--sand-line);border-radius:10px;
+      box-shadow:var(--shadow);padding:8px;max-height:230px;overflow-y:auto;
+    }
+    .multiselect-panel.open{display:block;}
+    .multiselect-panel label{
+      display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dark);
+      padding:7px 6px;cursor:pointer;border-radius:6px;
+    }
+    .multiselect-panel label:hover{background:var(--cream);}
+
     @media (max-width:760px){
       #appShell.active{flex-direction:column;}
       .sidebar{width:100%;flex-direction:row;overflow-x:auto;padding:14px 0;}
@@ -421,6 +457,24 @@
           <select id="libSceneFilter" onchange="loadLibrary()">
             <option value="">All scene types</option>
           </select>
+
+          <div class="multiselect" id="qualityFilterWrap">
+            <button type="button" class="multiselect-btn" id="qualityFilterBtn" onclick="toggleMultiselect('qualityFilterPanel')">All quality levels</button>
+            <div class="multiselect-panel" id="qualityFilterPanel">
+              <label><input type="checkbox" value="5" onchange="onLibraryMultiFilterChange()"> ★★★★★ (5)</label>
+              <label><input type="checkbox" value="4" onchange="onLibraryMultiFilterChange()"> ★★★★☆ (4)</label>
+              <label><input type="checkbox" value="3" onchange="onLibraryMultiFilterChange()"> ★★★☆☆ (3)</label>
+              <label><input type="checkbox" value="2" onchange="onLibraryMultiFilterChange()"> ★★☆☆☆ (2)</label>
+              <label><input type="checkbox" value="1" onchange="onLibraryMultiFilterChange()"> ★☆☆☆☆ (1)</label>
+            </div>
+          </div>
+
+          <div class="multiselect" id="moodFilterWrap">
+            <button type="button" class="multiselect-btn" id="moodFilterBtn" onclick="toggleMultiselect('moodFilterPanel')">All moods</button>
+            <div class="multiselect-panel" id="moodFilterPanel"></div>
+          </div>
+
+          <input type="text" class="input" id="libKeywordsFilter" placeholder="Search keywords..." oninput="debouncedLoadLibrary()">
           <input type="date" class="input" id="libDateFilter" onchange="loadLibrary()">
           <button class="btn-secondary-sm" onclick="clearLibraryFilters()">Clear filters</button>
         </div>
