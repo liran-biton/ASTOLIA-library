@@ -8,6 +8,11 @@ const CREATORS_SHEET     = 'Digital Creator';
 const BRANCHES_SHEET     = 'Spa Branches';
 const BENEFITS_SHEET     = 'Benefits';
 const PARTNERSHIPS_SHEET = 'Partnerships';
+const LIBRARY_SHEET      = 'Library Content';
+
+const LIBRARY_DRIVE_FOLDER_ID = '1Jrp_IGU5xi873QN1-EHo0qhkHv5r33Vw';
+const MAX_IMAGES_PER_PARTNERSHIP = 5;
+const MAX_VIDEOS_PER_PARTNERSHIP = 3;
 
 const SESSION_DAYS = 30;   // session length after a successful login
 
@@ -549,11 +554,27 @@ function safeTimeStr(value) {
   return String(value).trim();
 }
 
-function mapPartnership(it, user) {
+// Builds a { PartnershipID: { images, videos } } lookup from the Library
+// Content sheet in a single read, so getPartnerships doesn't re-query per row.
+function getContentCountsMap() {
+  const items = sheetToObjects(getSheet(LIBRARY_SHEET));
+  const map = {};
+  items.forEach(it => {
+    const pid = String(it.PartnershipID || '');
+    if (!pid) return;
+    if (!map[pid]) map[pid] = { images: 0, videos: 0 };
+    if (it.ContentType === 'Image') map[pid].images++;
+    else if (it.ContentType === 'Video') map[pid].videos++;
+  });
+  return map;
+}
+
+function mapPartnership(it, user, contentCounts) {
   const privileged = isPrivileged(user);
   const status = String(it.Status || '').trim();
   const creatorEmail = String(it.CreatorEmail || '').trim().toLowerCase();
   const isOwner = creatorEmail === String(user.email || '').trim().toLowerCase();
+  const counts = contentCounts || { images: 0, videos: 0 };
 
   return {
     id: String(it.PartnershipID || ''),
@@ -574,7 +595,12 @@ function mapPartnership(it, user) {
     approvedAt: safeDateStr(it.ApprovedAt),
     cancelledBy: String(it.CancelledBy || ''),
     canCancel: privileged && status !== PARTNERSHIP_STATUS.CANCELLED,
-    canApprove: !privileged && isOwner && status === PARTNERSHIP_STATUS.PENDING
+    canApprove: !privileged && isOwner && status === PARTNERSHIP_STATUS.PENDING,
+    canUploadContent: !privileged && isOwner && status === PARTNERSHIP_STATUS.APPROVED,
+    contentImages: counts.images,
+    contentVideos: counts.videos,
+    maxImages: MAX_IMAGES_PER_PARTNERSHIP,
+    maxVideos: MAX_VIDEOS_PER_PARTNERSHIP
   };
 }
 
@@ -607,7 +633,8 @@ function getPartnerships(token, filters) {
 
   items.sort((a, b) => safeDateStr(a.VisitDate).localeCompare(safeDateStr(b.VisitDate)));
 
-  return items.map(it => mapPartnership(it, user));
+  const countsMap = getContentCountsMap();
+  return items.map(it => mapPartnership(it, user, countsMap[String(it.PartnershipID || '')]));
 }
 
 function approvePartnership(token, id, data) {
@@ -678,4 +705,162 @@ function getPendingApprovalCount(token) {
     String(it.CreatorEmail).trim().toLowerCase() === String(user.email).trim().toLowerCase() &&
     it.Status === PARTNERSHIP_STATUS.PENDING
   ).length;
+}
+
+/*******************  LIBRARY CONTENT (UPLOADS)  ********/
+// Library Content sheet columns:
+// ContentID | PartnershipID | CreatorEmail | CreatorName | BranchID | BranchName |
+// VisitDate | ContentType | FileName | DriveFileId | FileUrl | UploadedAt | UploadedBy
+//
+// Files are uploaded by the content creator (after approving the partnership),
+// stored in a per-partnership subfolder inside LIBRARY_DRIVE_FOLDER_ID, and
+// indexed here so The Library tab can filter/browse them without touching Drive.
+
+function sanitizeFolderName(name) {
+  return String(name || 'Untitled').replace(/[\/\\:*?"<>|]/g, '-').trim().slice(0, 120) || 'Untitled';
+}
+
+function getOrCreatePartnershipFolder(partnership) {
+  const parent = DriveApp.getFolderById(LIBRARY_DRIVE_FOLDER_ID);
+  const folderName = sanitizeFolderName(
+    (partnership.CreatorName || 'Creator') + ' - ' +
+    safeDateStr(partnership.VisitDate) + ' - ' +
+    (partnership.BranchName || 'Branch')
+  );
+  const existing = parent.getFoldersByName(folderName);
+  if (existing.hasNext()) return existing.next();
+  return parent.createFolder(folderName);
+}
+
+function getPartnershipContentSummary(token, partnershipId) {
+  requireSession(token);
+  const items = sheetToObjects(getSheet(LIBRARY_SHEET)).filter(it => String(it.PartnershipID) === String(partnershipId));
+  return {
+    images: items.filter(it => it.ContentType === 'Image').length,
+    videos: items.filter(it => it.ContentType === 'Video').length,
+    maxImages: MAX_IMAGES_PER_PARTNERSHIP,
+    maxVideos: MAX_VIDEOS_PER_PARTNERSHIP
+  };
+}
+
+// files: [{ name, mimeType, base64, contentType: 'Image'|'Video' }, ...]
+function uploadPartnershipContent(token, partnershipId, files) {
+  const user = requireSession(token);
+  if (user.role !== ROLES.CREATOR) throw new Error('Only content creators can upload content.');
+
+  files = Array.isArray(files) ? files : [];
+  if (!files.length) throw new Error('Please select at least one file to upload.');
+
+  const badType = files.find(f => f.contentType !== 'Image' && f.contentType !== 'Video');
+  if (badType) throw new Error('Unknown content type for file: ' + badType.name);
+
+  const partnerships = sheetToObjects(getSheet(PARTNERSHIPS_SHEET));
+  const partnership = partnerships.find(it => String(it.PartnershipID) === String(partnershipId));
+  if (!partnership) throw new Error('Partnership not found.');
+
+  if (String(partnership.CreatorEmail || '').trim().toLowerCase() !== String(user.email || '').trim().toLowerCase()) {
+    throw new Error('You do not have permission to upload content for this partnership.');
+  }
+  if (String(partnership.Status || '').trim() !== PARTNERSHIP_STATUS.APPROVED) {
+    throw new Error('You can upload content only after approving the partnership.');
+  }
+
+  const librarySheet = getSheet(LIBRARY_SHEET);
+  const existing = sheetToObjects(librarySheet).filter(it => String(it.PartnershipID) === String(partnershipId));
+  const existingImages = existing.filter(it => it.ContentType === 'Image').length;
+  const existingVideos = existing.filter(it => it.ContentType === 'Video').length;
+
+  const newImages = files.filter(f => f.contentType === 'Image').length;
+  const newVideos = files.filter(f => f.contentType === 'Video').length;
+
+  if (existingImages + newImages > MAX_IMAGES_PER_PARTNERSHIP) {
+    throw new Error('You can upload up to ' + MAX_IMAGES_PER_PARTNERSHIP + ' photos per partnership (' + existingImages + ' already uploaded).');
+  }
+  if (existingVideos + newVideos > MAX_VIDEOS_PER_PARTNERSHIP) {
+    throw new Error('You can upload up to ' + MAX_VIDEOS_PER_PARTNERSHIP + ' videos per partnership (' + existingVideos + ' already uploaded).');
+  }
+
+  const folder = getOrCreatePartnershipFolder(partnership);
+
+  files.forEach(f => {
+    if (!f.base64 || !f.name) return;
+    const bytes = Utilities.base64Decode(f.base64);
+    const blob = Utilities.newBlob(bytes, f.mimeType || 'application/octet-stream', f.name);
+    const file = folder.createFile(blob);
+    try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) { /* sharing restricted by domain policy — file still saved */ }
+
+    librarySheet.appendRow([
+      Utilities.getUuid(),
+      partnershipId,
+      partnership.CreatorEmail,
+      partnership.CreatorName,
+      partnership.BranchID,
+      partnership.BranchName,
+      partnership.VisitDate,
+      f.contentType,
+      f.name,
+      file.getId(),
+      file.getUrl(),
+      new Date(),
+      user.email
+    ]);
+  });
+
+  return getPartnershipContentSummary(token, partnershipId);
+}
+
+/*******************  THE LIBRARY (browse/filter)  ******/
+// (Admin + Video Editor only)
+
+function getLibraryFilterOptions(token) {
+  requirePrivileged(token);
+  const items = sheetToObjects(getSheet(LIBRARY_SHEET));
+
+  const creators = {};
+  const branches = {};
+  items.forEach(it => {
+    const email = String(it.CreatorEmail || '').trim();
+    if (email) creators[email] = it.CreatorName || email;
+    const bId = String(it.BranchID || '').trim();
+    if (bId) branches[bId] = it.BranchName || bId;
+  });
+
+  return {
+    creators: Object.keys(creators).map(email => ({ email: email, name: creators[email] })).sort((a, b) => a.name.localeCompare(b.name)),
+    branches: Object.keys(branches).map(id => ({ id: id, name: branches[id] })).sort((a, b) => a.name.localeCompare(b.name))
+  };
+}
+
+function getLibraryContent(token, filters) {
+  requirePrivileged(token);
+  filters = filters || {};
+
+  let items = sheetToObjects(getSheet(LIBRARY_SHEET));
+
+  if (filters.creatorEmail) {
+    items = items.filter(it => String(it.CreatorEmail || '').trim().toLowerCase() === String(filters.creatorEmail).trim().toLowerCase());
+  }
+  if (filters.contentType) {
+    items = items.filter(it => it.ContentType === filters.contentType);
+  }
+  if (filters.branchId) {
+    items = items.filter(it => String(it.BranchID) === String(filters.branchId));
+  }
+  if (filters.date) {
+    items = items.filter(it => safeDateStr(it.VisitDate) === filters.date);
+  }
+
+  items.sort((a, b) => new Date(b.UploadedAt) - new Date(a.UploadedAt));
+
+  return items.map(it => ({
+    id: String(it.ContentID || ''),
+    creatorName: String(it.CreatorName || ''),
+    branchName: String(it.BranchName || ''),
+    visitDate: safeDateStr(it.VisitDate),
+    contentType: String(it.ContentType || ''),
+    fileName: String(it.FileName || ''),
+    fileUrl: String(it.FileUrl || ''),
+    thumbUrl: it.DriveFileId ? ('https://drive.google.com/thumbnail?id=' + it.DriveFileId + '&sz=w500') : '',
+    uploadedAt: it.UploadedAt ? Utilities.formatDate(new Date(it.UploadedAt), Session.getScriptTimeZone(), 'yyyy-MM-dd') : ''
+  }));
 }
