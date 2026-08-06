@@ -116,6 +116,7 @@
 
     applyRoleVisibility();
     switchTab('digitalCreator');
+    refreshPendingBadge();
   }
 
   function applyRoleVisibility() {
@@ -123,9 +124,24 @@
     const libraryTab = document.querySelector('.nav-item[data-tab="library"]');
     const partnershipsTab = document.querySelector('.nav-item[data-tab="partnerships"]');
 
-    const isPrivileged = (role === ROLES.EDITOR || role === ROLES.ADMIN);
-    libraryTab.style.display = isPrivileged ? 'flex' : 'none';
-    partnershipsTab.style.display = isPrivileged ? 'flex' : 'none';
+    const privileged = (role === ROLES.EDITOR || role === ROLES.ADMIN);
+    libraryTab.style.display = privileged ? 'flex' : 'none';
+    partnershipsTab.style.display = privileged ? 'flex' : 'none';
+
+    document.getElementById('newPartnershipBtn').classList.toggle('hidden', !privileged);
+  }
+
+  function refreshPendingBadge() {
+    if (currentUser.role !== ROLES.CREATOR) return;
+    callServer('getPendingApprovalCount', currentToken).then(count => {
+      const badge = document.getElementById('expBadge');
+      if (count > 0) {
+        badge.textContent = count;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }).catch(() => {});
   }
 
   function switchTab(tab) {
@@ -140,6 +156,12 @@
     if (tab === 'digitalCreator') {
       loadCities();
       loadCreators();
+    }
+    if (tab === 'partnerships') {
+      switchPartnershipSubTab('list');
+    }
+    if (tab === 'experiences') {
+      loadExperiences();
     }
   }
 
@@ -175,12 +197,13 @@
         renderCreators(res.items);
       })
       .catch(err => {
-        grid.innerHTML = '<div class="empty-state">Could not load profiles. Please refresh.</div>';
+        grid.innerHTML = '<div class="empty-state">' + escapeHtml((err && err.message) ? err.message : 'Could not load profiles. Please refresh.') + '</div>';
       });
   }
 
   function renderCreators(items) {
     const grid = document.getElementById('creatorsGrid');
+    items = Array.isArray(items) ? items : [];
     if (!items.length) {
       grid.innerHTML = '<div class="empty-state">No profiles found yet.</div>';
       return;
@@ -302,7 +325,449 @@
       });
   }
 
+  /* ------------------------- CREATOR PARTNERSHIPS -------------------- */
+
+  function switchPartnershipSubTab(sub) {
+    document.querySelectorAll('.sub-tab').forEach(el => el.classList.remove('active'));
+    const tabEl = document.querySelector('.sub-tab[data-subtab="' + sub + '"]');
+    if (tabEl) tabEl.classList.add('active');
+
+    document.querySelectorAll('.subtab-page').forEach(el => el.classList.add('hidden'));
+    document.getElementById('subtab-' + sub).classList.remove('hidden');
+
+    if (sub === 'list') loadPartnerships();
+    if (sub === 'branches') loadBranches();
+    if (sub === 'benefits') loadBenefitsAdmin();
+  }
+
+  function clearPartnershipDate() {
+    document.getElementById('pDateFilter').value = '';
+    loadPartnerships();
+  }
+
+  function loadPartnerships() {
+    const grid = document.getElementById('partnershipsGrid');
+    grid.innerHTML = '<div class="empty-state">Loading partnerships...</div>';
+
+    const filters = {
+      date: document.getElementById('pDateFilter').value,
+      statusFilter: document.getElementById('pStatusFilter').value
+    };
+
+    callServer('getPartnerships', currentToken, filters)
+      .then(items => {
+        try {
+          renderPartnerships(items, grid, false);
+        } catch (renderErr) {
+          console.error('renderPartnerships failed', renderErr, items);
+          grid.innerHTML = '<div class="empty-state">Display error: ' + escapeHtml(renderErr.message) + '</div>';
+        }
+      })
+      .catch(err => { grid.innerHTML = '<div class="empty-state">' + escapeHtml((err && err.message) ? err.message : 'Could not load partnerships.') + '</div>'; });
+  }
+
+  function renderPartnerships(items, grid, isExperiencesView) {
+    items = Array.isArray(items) ? items : [];
+    if (!items.length) {
+      grid.innerHTML = '<div class="empty-state">No partnerships found.</div>';
+      return;
+    }
+
+    grid.innerHTML = items.map(it => {
+      const statusClass = it.status === 'Approved' ? 'status-approved'
+        : it.status === 'Cancelled' ? 'status-cancelled' : 'status-pending';
+
+      const contentTags = [];
+      if (it.posts > 0) contentTags.push(it.posts + ' Post' + (it.posts > 1 ? 's' : ''));
+      if (it.reels > 0) contentTags.push(it.reels + ' Reels');
+      if (it.stories > 0) contentTags.push(it.stories + ' Story');
+
+      const benefitTags = (it.benefits || '').split(',').map(b => b.trim()).filter(Boolean);
+
+      let actions = '';
+      if (it.canApprove) {
+        actions += '<button class="edit-btn" onclick=\'openApproveModal(' + JSON.stringify(it).replace(/'/g, "&#39;") + ')\'>Review &amp; Approve</button>';
+      }
+      if (it.canCancel) {
+        actions += '<button class="edit-btn" style="color:var(--danger);margin-left:12px;" onclick="handleCancelPartnership(\'' + it.id + '\')">Cancel</button>';
+      }
+
+      return '' +
+        '<div class="creator-card">' +
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
+            '<div class="creator-name">' + escapeHtml(it.creatorName) + '</div>' +
+            '<span class="status-pill ' + statusClass + '">' + escapeHtml(it.status) + '</span>' +
+          '</div>' +
+          '<div class="creator-city">' + escapeHtml(it.branchName) + '</div>' +
+          '<div class="info-row"><span>Date</span><span>' + formatDateUS(it.visitDate) + (it.visitTime ? ' · ' + escapeHtml(it.visitTime) : '') + '</span></div>' +
+          '<div class="info-row"><span>People</span><span>' + escapeHtml(String(it.peopleCount)) + '</span></div>' +
+          '<div class="info-row"><span>Upload deadline</span><span>' + escapeHtml(it.uploadDeadline) + '</span></div>' +
+          (benefitTags.length ? '<div class="tag-row">' + benefitTags.map(b => '<span class="tag">' + escapeHtml(b) + '</span>').join('') + '</div>' : '') +
+          (contentTags.length ? '<div class="tag-row">' + contentTags.map(c => '<span class="tag">' + escapeHtml(c) + '</span>').join('') + '</div>' : '') +
+          (it.status === 'Cancelled' && it.cancelledBy ? '<div class="info-row"><span>Cancelled by</span><span>' + escapeHtml(it.cancelledBy) + '</span></div>' : '') +
+          (it.status === 'Approved' && it.pregnancyDeclaration ? '<div class="info-row"><span>Pregnancy declaration</span><span>' + escapeHtml(it.pregnancyDeclaration) + '</span></div>' : '') +
+          (actions ? '<div class="card-footer">' + actions + '</div>' : '') +
+        '</div>';
+    }).join('');
+  }
+
+  function openCreatePartnershipModal() {
+    document.getElementById('npMsg').textContent = '';
+    document.getElementById('npDate').value = '';
+    document.getElementById('npTime').value = '';
+    document.getElementById('npPeople').value = '1';
+    document.getElementById('npDeadline').value = '';
+    ['npPostChk','npReelsChk','npStoryChk'].forEach(id => document.getElementById(id).checked = false);
+    ['npPostQty','npReelsQty','npStoryQty'].forEach(id => { document.getElementById(id).value = ''; document.getElementById(id).disabled = true; });
+
+    Promise.all([
+      callServer('getContentCreatorsList', currentToken),
+      callServer('getActiveSpaBranchesList', currentToken),
+      callServer('getActiveBenefitsList', currentToken)
+    ]).then(([creators, branches, benefits]) => {
+      creators = Array.isArray(creators) ? creators : [];
+      branches = Array.isArray(branches) ? branches : [];
+      benefits = Array.isArray(benefits) ? benefits : [];
+
+      document.getElementById('npCreator').innerHTML = '<option value="" disabled selected>Select a content creator...</option>' +
+        (creators.length
+          ? creators.map(c => '<option value="' + escapeHtml(c.email) + '">' + escapeHtml(c.name) + '</option>').join('')
+          : '');
+
+      document.getElementById('npBranch').innerHTML = '<option value="" disabled selected>Select a spa branch...</option>' +
+        (branches.length
+          ? branches.map(b => '<option value="' + escapeHtml(b.id) + '">' + escapeHtml(b.name) + '</option>').join('')
+          : '');
+
+      const list = document.getElementById('npBenefitsList');
+      list.innerHTML = benefits.length
+        ? benefits.map(b => '<label><input type="checkbox" class="npBenefitChk" value="' + escapeHtml(b.treatment + ' (' + b.duration + ')') + '"> ' + escapeHtml(b.treatment) + ' — ' + escapeHtml(b.duration) + '</label>').join('')
+        : '<div class="empty-state" style="padding:20px;">No active benefits defined yet.</div>';
+
+      document.getElementById('partnershipModal').classList.add('active');
+    }).catch(err => {
+      document.getElementById('npMsg').textContent = (err && err.message) ? err.message : 'Could not load form data. Please try again.';
+    });
+  }
+
+  function toggleQtyField(chkId, qtyId) {
+    const chk = document.getElementById(chkId);
+    const qty = document.getElementById(qtyId);
+    qty.disabled = !chk.checked;
+    if (!chk.checked) qty.value = '';
+    else if (!qty.value) qty.value = '1';
+  }
+
+  function closePartnershipModal() {
+    document.getElementById('partnershipModal').classList.remove('active');
+  }
+
+  function handleCreatePartnership() {
+    const benefits = Array.from(document.querySelectorAll('.npBenefitChk:checked')).map(el => el.value);
+
+    const data = {
+      creatorEmail: document.getElementById('npCreator').value,
+      branchId: document.getElementById('npBranch').value,
+      peopleCount: document.getElementById('npPeople').value,
+      visitDate: document.getElementById('npDate').value,
+      visitTime: document.getElementById('npTime').value,
+      benefits: benefits,
+      posts: document.getElementById('npPostChk').checked ? (document.getElementById('npPostQty').value || 0) : 0,
+      reels: document.getElementById('npReelsChk').checked ? (document.getElementById('npReelsQty').value || 0) : 0,
+      stories: document.getElementById('npStoryChk').checked ? (document.getElementById('npStoryQty').value || 0) : 0,
+      uploadDeadline: document.getElementById('npDeadline').value
+    };
+
+    if (!data.creatorEmail) { document.getElementById('npMsg').textContent = 'Please select a content creator.'; return; }
+    if (!data.branchId) { document.getElementById('npMsg').textContent = 'Please select a spa branch.'; return; }
+    if (!data.visitDate) { document.getElementById('npMsg').textContent = 'Please select a visit date.'; return; }
+    if (!data.uploadDeadline) { document.getElementById('npMsg').textContent = 'Please select an upload deadline.'; return; }
+
+    const btn = document.getElementById('npSaveBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Sending...';
+
+    callServer('createPartnership', currentToken, data)
+      .then(() => {
+        btn.disabled = false;
+        btn.textContent = 'Send to Creator';
+        closePartnershipModal();
+        loadPartnerships();
+      })
+      .catch(err => {
+        btn.disabled = false;
+        btn.textContent = 'Send to Creator';
+        document.getElementById('npMsg').textContent = (err && err.message) ? err.message : 'Could not create partnership.';
+      });
+  }
+
+  function handleCancelPartnership(id) {
+    if (!confirm('Cancel this partnership? The content creator will be notified.')) return;
+    callServer('cancelPartnership', currentToken, id)
+      .then(() => {
+        loadPartnerships();
+        loadExperiences();
+      })
+      .catch(err => alert((err && err.message) ? err.message : 'Could not cancel partnership.'));
+  }
+
+  /* ---------------------- SPA BRANCHES (admin/editor) ----------------- */
+
+  function loadBranches() {
+    const grid = document.getElementById('branchesGrid');
+    grid.innerHTML = '<div class="empty-state">Loading branches...</div>';
+
+    callServer('getSpaBranches', currentToken).then(items => {
+      items = Array.isArray(items) ? items : [];
+      if (!items.length) { grid.innerHTML = '<div class="empty-state">No spa branches added yet.</div>'; return; }
+
+      grid.innerHTML = items.map(b => {
+        const activities = [];
+        if (b.swedishMassage) activities.push('Swedish Massage');
+        if (b.reflexology) activities.push('Reflexology');
+        if (b.poolArea) activities.push('Pool Area');
+        if (b.jacuzzi) activities.push('Jacuzzi');
+        if (b.sauna) activities.push('Sauna');
+
+        return '' +
+          '<div class="creator-card">' +
+            '<div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
+              '<div class="creator-name">' + escapeHtml(b.name) + '</div>' +
+              '<span class="status-pill ' + (b.status === 'Active' ? 'status-active' : 'status-inactive') + '">' + escapeHtml(b.status) + '</span>' +
+            '</div>' +
+            (b.address ? '<div class="creator-about">' + escapeHtml(b.address) + '</div>' : '') +
+            (b.hours ? '<div class="info-row"><span>Hours</span><span>' + escapeHtml(b.hours) + '</span></div>' : '') +
+            (b.contact ? '<div class="info-row"><span>Contact</span><span>' + escapeHtml(b.contact) + '</span></div>' : '') +
+            (activities.length ? '<div class="tag-row">' + activities.map(a => '<span class="tag">' + escapeHtml(a) + '</span>').join('') + '</div>' : '') +
+            '<div class="card-footer"><button class="edit-btn" onclick=\'openBranchModal(' + JSON.stringify(b).replace(/'/g, "&#39;") + ')\'>Edit</button></div>' +
+          '</div>';
+      }).join('');
+    }).catch(err => { grid.innerHTML = '<div class="empty-state">' + escapeHtml((err && err.message) ? err.message : 'Could not load branches.') + '</div>'; });
+  }
+
+  function openBranchModal(branch) {
+    document.getElementById('branchMsg').textContent = '';
+    document.getElementById('branchModalTitle').textContent = branch ? 'Edit Spa Branch' : 'Add Spa Branch';
+    document.getElementById('branchId').value = branch ? branch.id : '';
+    document.getElementById('brName').value = branch ? branch.name : '';
+    document.getElementById('brAddress').value = branch ? branch.address : '';
+    document.getElementById('brHours').value = branch ? branch.hours : '';
+    document.getElementById('brContact').value = branch ? branch.contact : '';
+    document.getElementById('brSwedish').checked = branch ? !!branch.swedishMassage : false;
+    document.getElementById('brReflex').checked = branch ? !!branch.reflexology : false;
+    document.getElementById('brPool').checked = branch ? !!branch.poolArea : false;
+    document.getElementById('brJacuzzi').checked = branch ? !!branch.jacuzzi : false;
+    document.getElementById('brSauna').checked = branch ? !!branch.sauna : false;
+    document.getElementById('brStatus').value = branch ? branch.status : 'Active';
+    document.getElementById('branchModal').classList.add('active');
+  }
+
+  function closeBranchModal() {
+    document.getElementById('branchModal').classList.remove('active');
+  }
+
+  function handleSaveBranch() {
+    const id = document.getElementById('branchId').value;
+    const data = {
+      name: document.getElementById('brName').value.trim(),
+      address: document.getElementById('brAddress').value.trim(),
+      hours: document.getElementById('brHours').value.trim(),
+      contact: document.getElementById('brContact').value.trim(),
+      swedishMassage: document.getElementById('brSwedish').checked,
+      reflexology: document.getElementById('brReflex').checked,
+      poolArea: document.getElementById('brPool').checked,
+      jacuzzi: document.getElementById('brJacuzzi').checked,
+      sauna: document.getElementById('brSauna').checked,
+      status: document.getElementById('brStatus').value
+    };
+    if (!data.name) { document.getElementById('branchMsg').textContent = 'Branch name is required.'; return; }
+
+    const btn = document.getElementById('branchSaveBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Saving...';
+
+    const action = id
+      ? callServer('updateSpaBranch', currentToken, id, data)
+      : callServer('createSpaBranch', currentToken, data);
+
+    action.then(() => {
+      btn.disabled = false;
+      btn.textContent = 'Save Branch';
+      closeBranchModal();
+      loadBranches();
+    }).catch(err => {
+      btn.disabled = false;
+      btn.textContent = 'Save Branch';
+      document.getElementById('branchMsg').textContent = (err && err.message) ? err.message : 'Could not save branch.';
+    });
+  }
+
+  /* ---------------------- BENEFITS PACKAGE (admin/editor) ------------- */
+
+  function loadBenefitsAdmin() {
+    const grid = document.getElementById('benefitsGrid');
+    grid.innerHTML = '<div class="empty-state">Loading benefits...</div>';
+
+    callServer('getBenefits', currentToken).then(items => {
+      items = Array.isArray(items) ? items : [];
+      if (!items.length) { grid.innerHTML = '<div class="empty-state">No benefits added yet.</div>'; return; }
+
+      grid.innerHTML = items.map(b => '' +
+        '<div class="creator-card">' +
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
+            '<div class="creator-name">' + escapeHtml(b.treatment) + '</div>' +
+            '<span class="status-pill ' + (b.status === 'Active' ? 'status-active' : 'status-inactive') + '">' + escapeHtml(b.status) + '</span>' +
+          '</div>' +
+          '<div class="info-row"><span>Duration</span><span>' + escapeHtml(b.duration) + '</span></div>' +
+          '<div class="card-footer"><button class="edit-btn" onclick=\'openBenefitModal(' + JSON.stringify(b).replace(/'/g, "&#39;") + ')\'>Edit</button></div>' +
+        '</div>'
+      ).join('');
+    }).catch(err => { grid.innerHTML = '<div class="empty-state">' + escapeHtml((err && err.message) ? err.message : 'Could not load benefits.') + '</div>'; });
+  }
+
+  function openBenefitModal(benefit) {
+    document.getElementById('benefitMsg').textContent = '';
+    document.getElementById('benefitModalTitle').textContent = benefit ? 'Edit Benefit' : 'Add Benefit';
+    document.getElementById('benefitId').value = benefit ? benefit.id : '';
+    document.getElementById('bfTreatment').value = benefit ? benefit.treatment : '';
+    document.getElementById('bfDuration').value = benefit ? benefit.duration : '';
+    document.getElementById('bfStatus').value = benefit ? benefit.status : 'Active';
+    document.getElementById('benefitModal').classList.add('active');
+  }
+
+  function closeBenefitModal() {
+    document.getElementById('benefitModal').classList.remove('active');
+  }
+
+  function handleSaveBenefit() {
+    const id = document.getElementById('benefitId').value;
+    const data = {
+      treatment: document.getElementById('bfTreatment').value.trim(),
+      duration: document.getElementById('bfDuration').value.trim(),
+      status: document.getElementById('bfStatus').value
+    };
+    if (!data.treatment) { document.getElementById('benefitMsg').textContent = 'Treatment name is required.'; return; }
+    if (!data.duration) { document.getElementById('benefitMsg').textContent = 'Duration is required.'; return; }
+
+    const btn = document.getElementById('benefitSaveBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Saving...';
+
+    const action = id
+      ? callServer('updateBenefit', currentToken, id, data)
+      : callServer('createBenefit', currentToken, data);
+
+    action.then(() => {
+      btn.disabled = false;
+      btn.textContent = 'Save Benefit';
+      closeBenefitModal();
+      loadBenefitsAdmin();
+    }).catch(err => {
+      btn.disabled = false;
+      btn.textContent = 'Save Benefit';
+      document.getElementById('benefitMsg').textContent = (err && err.message) ? err.message : 'Could not save benefit.';
+    });
+  }
+
+  /* ------------------------- MY EXPERIENCES --------------------------- */
+
+  function clearExperienceDate() {
+    document.getElementById('eDateFilter').value = '';
+    loadExperiences();
+  }
+
+  function loadExperiences() {
+    const grid = document.getElementById('experiencesGrid');
+    grid.innerHTML = '<div class="empty-state">Loading...</div>';
+
+    const filters = {
+      date: document.getElementById('eDateFilter').value,
+      statusFilter: document.getElementById('eStatusFilter').value
+    };
+
+    callServer('getPartnerships', currentToken, filters)
+      .then(items => {
+        try {
+          renderPartnerships(items, grid, true);
+        } catch (renderErr) {
+          console.error('renderPartnerships failed', renderErr, items);
+          grid.innerHTML = '<div class="empty-state">Display error: ' + escapeHtml(renderErr.message) + '</div>';
+        }
+        refreshPendingBadge();
+      })
+      .catch(err => { grid.innerHTML = '<div class="empty-state">' + escapeHtml((err && err.message) ? err.message : 'Could not load experiences.') + '</div>'; });
+  }
+
+  function openApproveModal(item) {
+    document.getElementById('approveMsg').textContent = '';
+    document.getElementById('apConfirm1').checked = false;
+    document.getElementById('apConfirm2').checked = false;
+    document.getElementById('apPregnant').value = '';
+
+    const benefitTags = (item.benefits || '').split(',').map(b => b.trim()).filter(Boolean);
+    const contentBits = [];
+    if (item.posts > 0) contentBits.push(item.posts + ' Post' + (item.posts > 1 ? 's' : ''));
+    if (item.reels > 0) contentBits.push(item.reels + ' Reels');
+    if (item.stories > 0) contentBits.push(item.stories + ' Story');
+
+    document.getElementById('approveDetails').innerHTML =
+      '<div class="info-row"><span>Spa branch</span><span>' + escapeHtml(item.branchName) + '</span></div>' +
+      '<div class="info-row"><span>Date</span><span>' + formatDateUS(item.visitDate) + (item.visitTime ? ' · ' + escapeHtml(item.visitTime) : '') + '</span></div>' +
+      '<div class="info-row"><span>People</span><span>' + escapeHtml(String(item.peopleCount)) + '</span></div>' +
+      '<div class="info-row"><span>Benefits</span><span>' + escapeHtml(benefitTags.join(', ') || '—') + '</span></div>' +
+      '<div class="info-row"><span>Content to deliver</span><span>' + escapeHtml(contentBits.join(', ') || '—') + '</span></div>' +
+      '<div class="info-row"><span>Upload deadline</span><span>' + escapeHtml(item.uploadDeadline) + '</span></div>';
+
+    document.getElementById('approveModal').dataset.partnershipId = item.id;
+    document.getElementById('approveModal').classList.add('active');
+  }
+
+  function closeApproveModal() {
+    document.getElementById('approveModal').classList.remove('active');
+  }
+
+  function handleApprovePartnership() {
+    const id = document.getElementById('approveModal').dataset.partnershipId;
+    const data = {
+      healthConfirmed: document.getElementById('apConfirm1').checked && document.getElementById('apConfirm2').checked,
+      pregnancyDeclaration: document.getElementById('apPregnant').value
+    };
+
+    if (!document.getElementById('apConfirm1').checked || !document.getElementById('apConfirm2').checked) {
+      document.getElementById('approveMsg').textContent = 'Please confirm both declarations to continue.';
+      return;
+    }
+    if (!data.pregnancyDeclaration) {
+      document.getElementById('approveMsg').textContent = 'Please answer the pregnancy declaration.';
+      return;
+    }
+
+    const btn = document.getElementById('approveSaveBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Approving...';
+
+    callServer('approvePartnership', currentToken, id, data)
+      .then(() => {
+        btn.disabled = false;
+        btn.textContent = 'Approve Partnership';
+        closeApproveModal();
+        loadExperiences();
+      })
+      .catch(err => {
+        btn.disabled = false;
+        btn.textContent = 'Approve Partnership';
+        document.getElementById('approveMsg').textContent = (err && err.message) ? err.message : 'Could not approve partnership.';
+      });
+  }
+
   /* ------------------------- UTILS ----------------------------------- */
+
+  function formatDateUS(isoDate) {
+    if (!isoDate) return '—';
+    const parts = String(isoDate).split('-');
+    if (parts.length !== 3) return isoDate;
+    return parts[1] + '/' + parts[2] + '/' + parts[0]; // MM/DD/YYYY
+  }
 
   function escapeHtml(str) {
     return String(str == null ? '' : str)
