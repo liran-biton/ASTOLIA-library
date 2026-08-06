@@ -247,6 +247,65 @@
     .modal-actions .btn{margin-top:0;}
     textarea.input{resize:vertical;min-height:70px;}
 
+    .nav-badge{
+      margin-left:auto;background:var(--gold);color:var(--white);
+      font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;
+    }
+
+    /* sub-tabs (inside Creator Partnerships) */
+    .sub-tabs{display:flex;gap:6px;margin-bottom:22px;border-bottom:1px solid var(--sand-line);}
+    .sub-tab{
+      padding:10px 18px;font-size:13.5px;font-weight:600;color:var(--text-mute);
+      cursor:pointer;border-bottom:2px solid transparent;
+    }
+    .sub-tab:hover{color:var(--teal-deep);}
+    .sub-tab.active{color:var(--teal-deep);border-bottom-color:var(--gold);}
+    .subtab-page.hidden{display:none;}
+
+    .btn-secondary-sm{
+      background:transparent;border:1px solid var(--sand-line);color:var(--sage-dark);
+      padding:11px 16px;border-radius:10px;font-size:13px;font-weight:600;
+    }
+    .btn-secondary-sm:hover{background:var(--sand);}
+
+    /* partnership / branch / benefit cards */
+    .status-pill{
+      display:inline-block;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
+      padding:4px 10px;border-radius:20px;
+    }
+    .status-pending{background:#F3E6C9;color:#8A6A1F;}
+    .status-approved{background:#DCEAE0;color:var(--sage-dark);}
+    .status-cancelled{background:#F3DCD5;color:var(--danger);}
+    .status-inactive{background:#EDEAE3;color:var(--text-mute);}
+    .status-active{background:#DCEAE0;color:var(--sage-dark);}
+
+    .info-row{font-size:13px;color:var(--text-dark);display:flex;justify-content:space-between;gap:10px;}
+    .info-row span:first-child{color:var(--text-mute);}
+    .tag-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}
+    .tag{
+      font-size:11px;background:var(--cream);border:1px solid var(--sand-line);
+      color:var(--teal-mid);padding:4px 9px;border-radius:20px;
+    }
+
+    /* modals: extra widgets */
+    .modal-wide{max-width:640px;}
+    .checklist{display:flex;flex-direction:column;gap:8px;margin:6px 0 16px;}
+    .checklist label{font-size:13.5px;color:var(--text-dark);display:flex;align-items:center;gap:8px;}
+    .content-package-row{display:flex;align-items:center;gap:14px;margin-bottom:8px;}
+    .content-package-row label{display:flex;align-items:center;gap:8px;font-size:13.5px;min-width:100px;}
+    .qty-input{max-width:90px;padding:8px 10px;}
+    .qty-input:disabled{opacity:.4;}
+    .approve-details{
+      background:var(--cream);border:1px solid var(--sand-line);border-radius:10px;
+      padding:16px;margin-bottom:16px;font-size:13.5px;
+    }
+    .approve-details .info-row{margin-bottom:6px;}
+    .confirm-row{
+      display:flex;align-items:flex-start;gap:10px;font-size:13px;color:var(--text-dark);
+      margin-bottom:14px;line-height:1.5;cursor:pointer;
+    }
+    .confirm-row input{margin-top:3px;}
+
     @media (max-width:760px){
       #appShell.active{flex-direction:column;}
       .sidebar{width:100%;flex-direction:row;overflow-x:auto;padding:14px 0;}
@@ -297,6 +356,7 @@
       </div>
       <div class="nav-item" data-tab="experiences" onclick="switchTab('experiences')">
         <span class="nav-dot"></span> My Experiences
+        <span class="nav-badge hidden" id="expBadge">0</span>
       </div>
 
       <div class="sidebar-footer">
@@ -340,27 +400,216 @@
       <!-- CREATOR PARTNERSHIPS -->
       <div class="tab-page" id="page-partnerships">
         <div class="page-header">
-          <div class="page-title">Creator Partnerships<small>Collaboration management</small></div>
+          <div class="page-title">Creator Partnerships<small>Spa collaborations with content creators</small></div>
+          <button class="btn-accent hidden" id="newPartnershipBtn" onclick="openCreatePartnershipModal()">+ New Partnership</button>
         </div>
-        <div class="coming-soon">
-          <h3>Creator Partnerships</h3>
-          <p>This section is being crafted for video editors and admins.</p>
-          <span class="badge-soon">Coming soon</span>
+
+        <div class="sub-tabs">
+          <div class="sub-tab active" data-subtab="list" onclick="switchPartnershipSubTab('list')">Partnerships</div>
+          <div class="sub-tab" data-subtab="branches" onclick="switchPartnershipSubTab('branches')">Spa Branches</div>
+          <div class="sub-tab" data-subtab="benefits" onclick="switchPartnershipSubTab('benefits')">Benefits Package</div>
+        </div>
+
+        <!-- sub: partnerships list -->
+        <div class="subtab-page" id="subtab-list">
+          <div class="filter-bar">
+            <input type="date" class="input" id="pDateFilter" onchange="loadPartnerships()">
+            <select id="pStatusFilter" onchange="loadPartnerships()">
+              <option value="upcoming">Upcoming</option>
+              <option value="past">Past</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="all">All</option>
+            </select>
+            <button class="btn-secondary-sm" onclick="clearPartnershipDate()">Clear date</button>
+          </div>
+          <div class="grid" id="partnershipsGrid"></div>
+        </div>
+
+        <!-- sub: spa branches -->
+        <div class="subtab-page hidden" id="subtab-branches">
+          <div class="page-header" style="margin-bottom:16px;">
+            <div></div>
+            <button class="btn-accent" onclick="openBranchModal()">+ Add Branch</button>
+          </div>
+          <div class="grid" id="branchesGrid"></div>
+        </div>
+
+        <!-- sub: benefits -->
+        <div class="subtab-page hidden" id="subtab-benefits">
+          <div class="page-header" style="margin-bottom:16px;">
+            <div></div>
+            <button class="btn-accent" onclick="openBenefitModal()">+ Add Benefit</button>
+          </div>
+          <div class="grid" id="benefitsGrid"></div>
         </div>
       </div>
 
       <!-- MY EXPERIENCES -->
       <div class="tab-page" id="page-experiences">
         <div class="page-header">
-          <div class="page-title">My Experiences<small>Projects &amp; collaborations</small></div>
+          <div class="page-title">My Experiences<small>Spa partnerships &amp; approvals</small></div>
         </div>
-        <div class="coming-soon">
-          <h3>My Experiences</h3>
-          <p>This section is coming soon.</p>
-          <span class="badge-soon">Coming soon</span>
+
+        <div class="filter-bar">
+          <input type="date" class="input" id="eDateFilter" onchange="loadExperiences()">
+          <select id="eStatusFilter" onchange="loadExperiences()">
+            <option value="upcoming">Upcoming</option>
+            <option value="past">Past</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="all">All</option>
+          </select>
+          <button class="btn-secondary-sm" onclick="clearExperienceDate()">Clear date</button>
+        </div>
+
+        <div class="grid" id="experiencesGrid"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===================== NEW PARTNERSHIP MODAL ===================== -->
+  <div class="modal-overlay" id="partnershipModal">
+    <div class="modal modal-wide">
+      <h3>New Partnership</h3>
+
+      <div class="field-label">Content creator *</div>
+      <select class="input" id="npCreator"></select>
+
+      <div class="modal-grid" style="margin-top:6px;">
+        <div>
+          <div class="field-label">Spa branch *</div>
+          <select class="input" id="npBranch"></select>
+        </div>
+        <div>
+          <div class="field-label">Number of people *</div>
+          <input type="number" class="input" id="npPeople" min="1" step="1" value="1">
+        </div>
+        <div>
+          <div class="field-label">Visit date *</div>
+          <input type="date" class="input" id="npDate">
+        </div>
+        <div>
+          <div class="field-label">Arrival time</div>
+          <input type="time" class="input" id="npTime">
         </div>
       </div>
 
+      <div class="field-label">Benefits package — select what's included *</div>
+      <div class="checklist" id="npBenefitsList"></div>
+
+      <div class="field-label">Content package</div>
+      <div class="content-package-row">
+        <label><input type="checkbox" id="npPostChk" onchange="toggleQtyField('npPostChk','npPostQty')"> Post</label>
+        <input type="number" class="input qty-input" id="npPostQty" min="1" step="1" placeholder="Qty" disabled>
+      </div>
+      <div class="content-package-row">
+        <label><input type="checkbox" id="npReelsChk" onchange="toggleQtyField('npReelsChk','npReelsQty')"> Reels</label>
+        <input type="number" class="input qty-input" id="npReelsQty" min="1" step="1" placeholder="Qty" disabled>
+      </div>
+      <div class="content-package-row">
+        <label><input type="checkbox" id="npStoryChk" onchange="toggleQtyField('npStoryChk','npStoryQty')"> Story</label>
+        <input type="number" class="input qty-input" id="npStoryQty" min="1" step="1" placeholder="Qty" disabled>
+      </div>
+
+      <div class="field-label">Upload deadline *</div>
+      <select class="input" id="npDeadline">
+        <option value="">Select...</option>
+        <option value="Up to 1 week">Up to 1 week</option>
+        <option value="Up to 2 weeks">Up to 2 weeks</option>
+        <option value="Up to 1 month">Up to 1 month</option>
+      </select>
+
+      <div class="msg error" id="npMsg"></div>
+      <div class="modal-actions">
+        <button class="btn" id="npSaveBtn" onclick="handleCreatePartnership()">Send to Creator</button>
+        <button class="btn btn-secondary" onclick="closePartnershipModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== BRANCH MODAL ===================== -->
+  <div class="modal-overlay" id="branchModal">
+    <div class="modal">
+      <h3 id="branchModalTitle">Add Spa Branch</h3>
+      <input type="hidden" id="branchId">
+      <div class="field-label">Branch name *</div>
+      <input type="text" class="input" id="brName">
+      <div class="field-label">Address</div>
+      <input type="text" class="input" id="brAddress">
+      <div class="field-label">Operating hours</div>
+      <input type="text" class="input" id="brHours" placeholder="e.g. Sun-Thu 9:00-20:00">
+      <div class="field-label">Contact person</div>
+      <input type="text" class="input" id="brContact">
+      <div class="field-label">Activities available</div>
+      <div class="checklist">
+        <label><input type="checkbox" id="brSwedish"> Swedish Massage</label>
+        <label><input type="checkbox" id="brReflex"> Reflexology</label>
+        <label><input type="checkbox" id="brPool"> Pool Area</label>
+        <label><input type="checkbox" id="brJacuzzi"> Jacuzzi</label>
+        <label><input type="checkbox" id="brSauna"> Sauna</label>
+      </div>
+      <div class="field-label">Status</div>
+      <select class="input" id="brStatus">
+        <option value="Active">Active</option>
+        <option value="Inactive">Inactive</option>
+      </select>
+      <div class="msg error" id="branchMsg"></div>
+      <div class="modal-actions">
+        <button class="btn" id="branchSaveBtn" onclick="handleSaveBranch()">Save Branch</button>
+        <button class="btn btn-secondary" onclick="closeBranchModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== BENEFIT MODAL ===================== -->
+  <div class="modal-overlay" id="benefitModal">
+    <div class="modal">
+      <h3 id="benefitModalTitle">Add Benefit</h3>
+      <input type="hidden" id="benefitId">
+      <div class="field-label">Treatment *</div>
+      <input type="text" class="input" id="bfTreatment" placeholder="e.g. Swedish Massage">
+      <div class="field-label">Duration *</div>
+      <input type="text" class="input" id="bfDuration" placeholder="e.g. 60 minutes">
+      <div class="field-label">Status</div>
+      <select class="input" id="bfStatus">
+        <option value="Active">Active</option>
+        <option value="Inactive">Inactive</option>
+      </select>
+      <div class="msg error" id="benefitMsg"></div>
+      <div class="modal-actions">
+        <button class="btn" id="benefitSaveBtn" onclick="handleSaveBenefit()">Save Benefit</button>
+        <button class="btn btn-secondary" onclick="closeBenefitModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== APPROVE PARTNERSHIP MODAL ===================== -->
+  <div class="modal-overlay" id="approveModal">
+    <div class="modal">
+      <h3>Review Partnership</h3>
+      <div id="approveDetails" class="approve-details"></div>
+
+      <label class="confirm-row">
+        <input type="checkbox" id="apConfirm1">
+        I confirm the partnership, the benefits received, and that I will upload the content as agreed.
+      </label>
+
+      <label class="confirm-row">
+        <input type="checkbox" id="apConfirm2">
+        I confirm the general health declaration below.
+      </label>
+      <div class="field-label">Are you currently pregnant? *</div>
+      <select class="input" id="apPregnant">
+        <option value="">Select...</option>
+        <option value="No">No</option>
+        <option value="Yes">Yes</option>
+      </select>
+
+      <div class="msg error" id="approveMsg"></div>
+      <div class="modal-actions">
+        <button class="btn" id="approveSaveBtn" onclick="handleApprovePartnership()">Approve Partnership</button>
+        <button class="btn btn-secondary" onclick="closeApproveModal()">Close</button>
+      </div>
     </div>
   </div>
 
