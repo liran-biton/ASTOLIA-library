@@ -944,7 +944,8 @@ function getLibraryFilterOptions(token) {
   return {
     creators: Object.keys(creators).map(email => ({ email: email, name: creators[email] })).sort((a, b) => a.name.localeCompare(b.name)),
     branches: Object.keys(branches).map(id => ({ id: id, name: branches[id] })).sort((a, b) => a.name.localeCompare(b.name)),
-    sceneTypes: AI_SCENE_TYPES
+    sceneTypes: AI_SCENE_TYPES,
+    moodTags: AI_MOOD_TAGS
   };
 }
 
@@ -968,6 +969,20 @@ function getLibraryContent(token, filters) {
   }
   if (filters.sceneType) {
     items = items.filter(it => it['AI Scene Type'] === filters.sceneType);
+  }
+  if (Array.isArray(filters.qualityScores) && filters.qualityScores.length) {
+    const scoreSet = filters.qualityScores.map(String);
+    items = items.filter(it => scoreSet.indexOf(String(it['AI Quality Score'])) !== -1);
+  }
+  if (Array.isArray(filters.moodTags) && filters.moodTags.length) {
+    items = items.filter(it => {
+      const tags = String(it['AI Mood Tags'] || '').split(',').map(t => t.trim());
+      return filters.moodTags.some(mt => tags.indexOf(mt) !== -1);
+    });
+  }
+  if (filters.keywords) {
+    const q = String(filters.keywords).trim().toLowerCase();
+    items = items.filter(it => String(it['AI Keywords'] || '').toLowerCase().indexOf(q) !== -1);
   }
 
   items.sort((a, b) => new Date(b.UploadedAt) - new Date(a.UploadedAt));
