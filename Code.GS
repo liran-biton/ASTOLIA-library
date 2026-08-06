@@ -1,10 +1,13 @@
 /*******************************************************
  *  ASTOLIA LIBRARY — Code.gs
- *  Backend logic: Auth (username + password), Sessions, Digital Creator
+ *  Backend logic: Auth, Sessions, Digital Creator, Creator Partnerships
  *******************************************************/
 
-const USERS_SHEET    = 'Users';
-const CREATORS_SHEET = 'Digital Creator';
+const USERS_SHEET        = 'Users';
+const CREATORS_SHEET     = 'Digital Creator';
+const BRANCHES_SHEET     = 'Spa Branches';
+const BENEFITS_SHEET     = 'Benefits';
+const PARTNERSHIPS_SHEET = 'Partnerships';
 
 const SESSION_DAYS = 30;   // session length after a successful login
 
@@ -12,6 +15,12 @@ const ROLES = {
   CREATOR: 'Content Creator',
   EDITOR : 'Video Editor',
   ADMIN  : 'Admin'
+};
+
+const PARTNERSHIP_STATUS = {
+  PENDING  : 'Pending Approval',
+  APPROVED : 'Approved',
+  CANCELLED: 'Cancelled'
 };
 
 /*******************  WEB APP ENTRY  *******************/
@@ -45,7 +54,7 @@ function getSheet(name) {
 function sheetToObjects(sheet) {
   const values = sheet.getDataRange().getValues();
   if (values.length < 2) return [];
-  const headers = values[0];
+  const headers = values[0].map(h => String(h).trim());
   return values.slice(1)
     .map((row, idx) => {
       const obj = { _row: idx + 2 };
@@ -129,6 +138,20 @@ function requireSession(token) {
   const user = validateSession(token);
   if (!user) throw new Error('SESSION_EXPIRED');
   return user;
+}
+
+function isPrivileged(user) {
+  return user.role === ROLES.EDITOR || user.role === ROLES.ADMIN;
+}
+
+function requirePrivileged(token) {
+  const user = requireSession(token);
+  if (!isPrivileged(user)) throw new Error('You do not have permission to perform this action.');
+  return user;
+}
+
+function parseBool(v) {
+  return v === true || String(v).trim().toLowerCase() === 'true' || String(v).trim().toLowerCase() === 'yes';
 }
 
 /*******************  DIGITAL CREATOR  ******************/
@@ -264,4 +287,395 @@ function updateDigitalCreatorProfile(token, id, data) {
   setCell('YouTube', data.youtube || '');
 
   return { success: true };
+}
+
+/*******************  SPA BRANCHES  *********************/
+// Spa Branches sheet columns:
+// BranchID | Branch Name | Address | Operating Hours | Contact Person |
+// Swedish Massage | Reflexology | Pool Area | Jacuzzi | Sauna | Status
+// (Admin + Video Editor only)
+
+function mapBranch(it) {
+  return {
+    id: it.BranchID,
+    name: it['Branch Name'] || '',
+    address: it.Address || '',
+    hours: it['Operating Hours'] || '',
+    contact: it['Contact Person'] || '',
+    swedishMassage: parseBool(it['Swedish Massage']),
+    reflexology: parseBool(it['Reflexology']),
+    poolArea: parseBool(it['Pool Area']),
+    jacuzzi: parseBool(it['Jacuzzi']),
+    sauna: parseBool(it['Sauna']),
+    status: it.Status || 'Active'
+  };
+}
+
+function getSpaBranches(token) {
+  requirePrivileged(token);
+  const items = sheetToObjects(getSheet(BRANCHES_SHEET));
+  items.sort((a, b) => String(a['Branch Name']).localeCompare(String(b['Branch Name'])));
+  return items.map(mapBranch);
+}
+
+function getActiveSpaBranchesList(token) {
+  requirePrivileged(token);
+  const items = sheetToObjects(getSheet(BRANCHES_SHEET))
+    .filter(it => String(it.Status).trim().toLowerCase() === 'active');
+  items.sort((a, b) => String(a['Branch Name']).localeCompare(String(b['Branch Name'])));
+  return items.map(mapBranch);
+}
+
+function createSpaBranch(token, data) {
+  requirePrivileged(token);
+  data = data || {};
+  if (!data.name || !String(data.name).trim()) throw new Error('Branch name is required.');
+
+  const sheet = getSheet(BRANCHES_SHEET);
+  const id = Utilities.getUuid();
+  sheet.appendRow([
+    id,
+    data.name || '',
+    data.address || '',
+    data.hours || '',
+    data.contact || '',
+    !!data.swedishMassage,
+    !!data.reflexology,
+    !!data.poolArea,
+    !!data.jacuzzi,
+    !!data.sauna,
+    data.status || 'Active'
+  ]);
+  return { success: true, id: id };
+}
+
+function updateSpaBranch(token, id, data) {
+  requirePrivileged(token);
+  data = data || {};
+  if (!data.name || !String(data.name).trim()) throw new Error('Branch name is required.');
+
+  const sheet = getSheet(BRANCHES_SHEET);
+  const items = sheetToObjects(sheet);
+  const target = items.find(it => it.BranchID === id);
+  if (!target) throw new Error('Branch not found.');
+
+  const row = target._row;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  function setCell(col, value) {
+    const c = headers.indexOf(col) + 1;
+    if (c > 0) sheet.getRange(row, c).setValue(value);
+  }
+
+  setCell('Branch Name', data.name || '');
+  setCell('Address', data.address || '');
+  setCell('Operating Hours', data.hours || '');
+  setCell('Contact Person', data.contact || '');
+  setCell('Swedish Massage', !!data.swedishMassage);
+  setCell('Reflexology', !!data.reflexology);
+  setCell('Pool Area', !!data.poolArea);
+  setCell('Jacuzzi', !!data.jacuzzi);
+  setCell('Sauna', !!data.sauna);
+  setCell('Status', data.status || 'Active');
+
+  return { success: true };
+}
+
+/*******************  BENEFITS PACKAGE  *****************/
+// Benefits sheet columns: BenefitID | Treatment | Duration | Status
+// (Admin + Video Editor only)
+
+function mapBenefit(it) {
+  return {
+    id: it.BenefitID,
+    treatment: it.Treatment || '',
+    duration: it.Duration || '',
+    status: it.Status || 'Active'
+  };
+}
+
+function getBenefits(token) {
+  requirePrivileged(token);
+  const items = sheetToObjects(getSheet(BENEFITS_SHEET));
+  items.sort((a, b) => String(a.Treatment).localeCompare(String(b.Treatment)));
+  return items.map(mapBenefit);
+}
+
+function getActiveBenefitsList(token) {
+  requirePrivileged(token);
+  const items = sheetToObjects(getSheet(BENEFITS_SHEET))
+    .filter(it => String(it.Status).trim().toLowerCase() === 'active');
+  items.sort((a, b) => String(a.Treatment).localeCompare(String(b.Treatment)));
+  return items.map(mapBenefit);
+}
+
+function createBenefit(token, data) {
+  requirePrivileged(token);
+  data = data || {};
+  if (!data.treatment || !String(data.treatment).trim()) throw new Error('Treatment name is required.');
+  if (!data.duration || !String(data.duration).trim()) throw new Error('Duration is required.');
+
+  const sheet = getSheet(BENEFITS_SHEET);
+  const id = Utilities.getUuid();
+  sheet.appendRow([id, data.treatment, data.duration, data.status || 'Active']);
+  return { success: true, id: id };
+}
+
+function updateBenefit(token, id, data) {
+  requirePrivileged(token);
+  data = data || {};
+  if (!data.treatment || !String(data.treatment).trim()) throw new Error('Treatment name is required.');
+  if (!data.duration || !String(data.duration).trim()) throw new Error('Duration is required.');
+
+  const sheet = getSheet(BENEFITS_SHEET);
+  const items = sheetToObjects(sheet);
+  const target = items.find(it => it.BenefitID === id);
+  if (!target) throw new Error('Benefit not found.');
+
+  const row = target._row;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  function setCell(col, value) {
+    const c = headers.indexOf(col) + 1;
+    if (c > 0) sheet.getRange(row, c).setValue(value);
+  }
+
+  setCell('Treatment', data.treatment || '');
+  setCell('Duration', data.duration || '');
+  setCell('Status', data.status || 'Active');
+
+  return { success: true };
+}
+
+/*******************  CONTENT CREATORS LIST  ************/
+// Used to populate the creator dropdown when building a new partnership.
+// Sourced from the Digital Creator sheet (actual creator profiles), not the
+// Users login sheet — a creator can have a profile without necessarily being
+// a system login user, and every profile should be selectable here.
+
+function getContentCreatorsList(token) {
+  requirePrivileged(token);
+  const profiles = sheetToObjects(getSheet(CREATORS_SHEET));
+
+  const seen = {};
+  const list = [];
+  profiles.forEach(p => {
+    const email = String(p.Email || '').trim();
+    if (!email) return;
+    const key = email.toLowerCase();
+    if (seen[key]) return; // dedupe in case of duplicate profiles for the same email
+    seen[key] = true;
+    list.push({ email: email, name: p.Name || email });
+  });
+
+  list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  return list;
+}
+
+/*******************  CREATOR PARTNERSHIPS  *************/
+// Partnerships sheet columns:
+// PartnershipID | CreatorEmail | CreatorName | BranchID | BranchName | VisitDate | VisitTime |
+// PeopleCount | Benefits | Posts | Reels | Stories | UploadDeadline | Status |
+// CreatedBy | CreatedAt | HealthConfirmed | PregnancyDeclaration | ApprovedAt | CancelledBy | CancelledAt
+
+function createPartnership(token, data) {
+  const user = requirePrivileged(token);
+  data = data || {};
+
+  if (!data.creatorEmail) throw new Error('Please select a content creator.');
+  if (!data.branchId) throw new Error('Please select a spa branch.');
+  if (!data.visitDate) throw new Error('Please select a visit date.');
+  if (!data.peopleCount || Number(data.peopleCount) < 1) throw new Error('Number of people must be at least 1.');
+  if (!data.uploadDeadline) throw new Error('Please select an upload deadline.');
+
+  const creator = getContentCreatorsList(token).find(c => c.email === data.creatorEmail);
+  if (!creator) throw new Error('Selected content creator was not found or is inactive.');
+
+  const branch = getActiveSpaBranchesList(token).find(b => b.id === data.branchId);
+  if (!branch) throw new Error('Selected spa branch is not available.');
+
+  const benefitsText = Array.isArray(data.benefits) ? data.benefits.join(', ') : '';
+  const visitDateObj = new Date(data.visitDate + 'T00:00:00');
+
+  const sheet = getSheet(PARTNERSHIPS_SHEET);
+  const id = Utilities.getUuid();
+  sheet.appendRow([
+    id,
+    creator.email,
+    creator.name,
+    branch.id,
+    branch.name,
+    visitDateObj,
+    data.visitTime || '',
+    Number(data.peopleCount),
+    benefitsText,
+    Number(data.posts) || 0,
+    Number(data.reels) || 0,
+    Number(data.stories) || 0,
+    data.uploadDeadline,
+    PARTNERSHIP_STATUS.PENDING,
+    user.email,
+    new Date(),
+    false,
+    '',
+    '',
+    '',
+    ''
+  ]);
+
+  return { success: true, id: id };
+}
+
+// Safely turns a sheet date value (Date object, ISO/US string, or blank) into
+// 'yyyy-MM-dd', never throwing — a bad/blank value just becomes ''.
+function safeDateStr(value) {
+  if (!value) return '';
+  try {
+    const d = (value instanceof Date) ? value : new Date(value);
+    if (isNaN(d.getTime())) return '';
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  } catch (e) {
+    return '';
+  }
+}
+
+// Visit time can come back from Sheets either as plain text ("12:22") or,
+// if the column auto-formatted as a time/date, as a Date object — this
+// normalizes either case to a clean 'HH:mm' string.
+function safeTimeStr(value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return '';
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'HH:mm');
+  }
+  return String(value).trim();
+}
+
+function mapPartnership(it, user) {
+  const privileged = isPrivileged(user);
+  const status = String(it.Status || '').trim();
+  const creatorEmail = String(it.CreatorEmail || '').trim().toLowerCase();
+  const isOwner = creatorEmail === String(user.email || '').trim().toLowerCase();
+
+  return {
+    id: String(it.PartnershipID || ''),
+    creatorEmail: String(it.CreatorEmail || ''),
+    creatorName: String(it.CreatorName || ''),
+    branchName: String(it.BranchName || ''),
+    visitDate: safeDateStr(it.VisitDate),
+    visitTime: safeTimeStr(it.VisitTime),
+    peopleCount: Number(it.PeopleCount) || 0,
+    benefits: String(it.Benefits || ''),
+    posts: Number(it.Posts) || 0,
+    reels: Number(it.Reels) || 0,
+    stories: Number(it.Stories) || 0,
+    uploadDeadline: String(it.UploadDeadline || ''),
+    status: status,
+    healthConfirmed: parseBool(it.HealthConfirmed),
+    pregnancyDeclaration: String(it.PregnancyDeclaration || ''),
+    approvedAt: safeDateStr(it.ApprovedAt),
+    cancelledBy: String(it.CancelledBy || ''),
+    canCancel: privileged && status !== PARTNERSHIP_STATUS.CANCELLED,
+    canApprove: !privileged && isOwner && status === PARTNERSHIP_STATUS.PENDING
+  };
+}
+
+function getPartnerships(token, filters) {
+  const user = requireSession(token);
+  filters = filters || {};
+
+  let items = sheetToObjects(getSheet(PARTNERSHIPS_SHEET));
+
+  if (user.role === ROLES.CREATOR) {
+    items = items.filter(it => String(it.CreatorEmail || '').trim().toLowerCase() === String(user.email || '').trim().toLowerCase());
+  }
+
+  if (filters.date) {
+    // a specific date was picked — this takes priority over the status filter
+    items = items.filter(it => safeDateStr(it.VisitDate) === filters.date);
+  } else {
+    const todayStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    const statusFilter = filters.statusFilter || 'upcoming';
+
+    if (statusFilter === 'upcoming') {
+      items = items.filter(it => safeDateStr(it.VisitDate) >= todayStr && String(it.Status || '').trim() !== PARTNERSHIP_STATUS.CANCELLED);
+    } else if (statusFilter === 'past') {
+      items = items.filter(it => safeDateStr(it.VisitDate) < todayStr && String(it.Status || '').trim() !== PARTNERSHIP_STATUS.CANCELLED);
+    } else if (statusFilter === 'cancelled') {
+      items = items.filter(it => String(it.Status || '').trim() === PARTNERSHIP_STATUS.CANCELLED);
+    }
+    // statusFilter === 'all' -> no extra filtering
+  }
+
+  items.sort((a, b) => safeDateStr(a.VisitDate).localeCompare(safeDateStr(b.VisitDate)));
+
+  return items.map(it => mapPartnership(it, user));
+}
+
+function approvePartnership(token, id, data) {
+  const user = requireSession(token);
+  data = data || {};
+
+  if (user.role !== ROLES.CREATOR) throw new Error('Only content creators can approve a partnership.');
+  if (!data.healthConfirmed) throw new Error('Please confirm both declarations to continue.');
+  if (data.pregnancyDeclaration !== 'Yes' && data.pregnancyDeclaration !== 'No') {
+    throw new Error('Please indicate the pregnancy declaration.');
+  }
+
+  const sheet = getSheet(PARTNERSHIPS_SHEET);
+  const items = sheetToObjects(sheet);
+  const target = items.find(it => it.PartnershipID === id);
+  if (!target) throw new Error('Partnership not found.');
+
+  if (String(target.CreatorEmail).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) {
+    throw new Error('You do not have permission to approve this partnership.');
+  }
+  if (target.Status !== PARTNERSHIP_STATUS.PENDING) {
+    throw new Error('This partnership can no longer be approved.');
+  }
+
+  const row = target._row;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  function setCell(col, value) {
+    const c = headers.indexOf(col) + 1;
+    if (c > 0) sheet.getRange(row, c).setValue(value);
+  }
+
+  setCell('Status', PARTNERSHIP_STATUS.APPROVED);
+  setCell('HealthConfirmed', true);
+  setCell('PregnancyDeclaration', data.pregnancyDeclaration);
+  setCell('ApprovedAt', new Date());
+
+  return { success: true };
+}
+
+function cancelPartnership(token, id) {
+  const user = requirePrivileged(token);
+
+  const sheet = getSheet(PARTNERSHIPS_SHEET);
+  const items = sheetToObjects(sheet);
+  const target = items.find(it => it.PartnershipID === id);
+  if (!target) throw new Error('Partnership not found.');
+  if (target.Status === PARTNERSHIP_STATUS.CANCELLED) throw new Error('This partnership is already cancelled.');
+
+  const row = target._row;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  function setCell(col, value) {
+    const c = headers.indexOf(col) + 1;
+    if (c > 0) sheet.getRange(row, c).setValue(value);
+  }
+
+  setCell('Status', PARTNERSHIP_STATUS.CANCELLED);
+  setCell('CancelledBy', user.email);
+  setCell('CancelledAt', new Date());
+
+  return { success: true };
+}
+
+function getPendingApprovalCount(token) {
+  const user = requireSession(token);
+  if (user.role !== ROLES.CREATOR) return 0;
+  const items = sheetToObjects(getSheet(PARTNERSHIPS_SHEET));
+  return items.filter(it =>
+    String(it.CreatorEmail).trim().toLowerCase() === String(user.email).trim().toLowerCase() &&
+    it.Status === PARTNERSHIP_STATUS.PENDING
+  ).length;
 }
