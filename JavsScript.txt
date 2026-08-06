@@ -123,10 +123,12 @@
     const role = currentUser.role;
     const libraryTab = document.querySelector('.nav-item[data-tab="library"]');
     const partnershipsTab = document.querySelector('.nav-item[data-tab="partnerships"]');
+    const experiencesTab = document.querySelector('.nav-item[data-tab="experiences"]');
 
     const privileged = (role === ROLES.EDITOR || role === ROLES.ADMIN);
     libraryTab.style.display = privileged ? 'flex' : 'none';
     partnershipsTab.style.display = privileged ? 'flex' : 'none';
+    experiencesTab.style.display = privileged ? 'none' : 'flex';
 
     document.getElementById('newPartnershipBtn').classList.toggle('hidden', !privileged);
   }
@@ -220,14 +222,23 @@
       if (it.facebook)  socials.push('<a class="social-link" href="' + escapeAttr(it.facebook)  + '" target="_blank">Facebook</a>');
       if (it.youtube)   socials.push('<a class="social-link" href="' + escapeAttr(it.youtube)   + '" target="_blank">YouTube</a>');
 
+      const statusClass = it.status === 'Inactive' ? 'status-inactive' : 'status-active';
+      const hasPartnerships = (it.pendingCount + it.approvedCount + it.cancelledCount) > 0;
+
       return '' +
         '<div class="creator-card">' +
-          '<div class="avatar-ring">' + escapeHtml(initials) + '</div>' +
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
+            '<div class="avatar-ring">' + escapeHtml(initials) + '</div>' +
+            '<span class="status-pill ' + statusClass + '">' + escapeHtml(it.status || 'Active') + '</span>' +
+          '</div>' +
           '<div class="creator-name">' + escapeHtml(it.name) + '</div>' +
           (it.city ? '<div class="creator-city">' + escapeHtml(it.city) + '</div>' : '') +
           (it.about ? '<div class="creator-about">' + escapeHtml(it.about) + '</div>' : '') +
           '<div class="creator-contact">' + escapeHtml(it.email) + (it.phone ? ' · ' + escapeHtml(it.phone) : '') + '</div>' +
           (socials.length ? '<div class="social-row">' + socials.join('') + '</div>' : '') +
+          (hasPartnerships ? '<div class="content-progress">' +
+            it.pendingCount + ' pending, ' + it.approvedCount + ' approved, ' + it.cancelledCount + ' cancelled' +
+          '</div>' : '') +
           '<div class="card-footer">' +
             (it.canEdit ? '<button class="edit-btn" onclick=\'openEditModal(' + JSON.stringify(it).replace(/'/g, "&#39;") + ')\'>Edit profile</button>' : '') +
           '</div>' +
@@ -241,6 +252,7 @@
     document.getElementById('modalTitle').textContent = 'Create Profile';
     document.getElementById('profileId').value = '';
     ['fName','fPhone','fCity','fAbout','fInstagram','fFacebook','fYoutube'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('fStatus').value = 'Active';
     document.getElementById('modalMsg').textContent = '';
 
     const emailWrap = document.getElementById('emailFieldWrap');
@@ -268,6 +280,7 @@
     document.getElementById('fInstagram').value = item.instagram || '';
     document.getElementById('fFacebook').value = item.facebook || '';
     document.getElementById('fYoutube').value = item.youtube || '';
+    document.getElementById('fStatus').value = item.status || 'Active';
     document.getElementById('modalMsg').textContent = '';
 
     const emailWrap = document.getElementById('emailFieldWrap');
@@ -298,7 +311,8 @@
       about: document.getElementById('fAbout').value.trim(),
       instagram: document.getElementById('fInstagram').value.trim(),
       facebook: document.getElementById('fFacebook').value.trim(),
-      youtube: document.getElementById('fYoutube').value.trim()
+      youtube: document.getElementById('fYoutube').value.trim(),
+      status: document.getElementById('fStatus').value
     };
 
     if (!data.name) {
@@ -370,6 +384,24 @@
       .catch(err => { grid.innerHTML = '<div class="empty-state">' + escapeHtml((err && err.message) ? err.message : 'Could not load partnerships.') + '</div>'; });
   }
 
+  function renderContentTaskRow(label, qty, done, partnershipId, field) {
+    if (!qty || qty <= 0) return '';
+    return '<div class="info-row"><span>' + qty + ' ' + escapeHtml(label) + '</span>' +
+      '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;">' +
+        '<input type="checkbox" ' + (done ? 'checked' : '') + ' onchange="handleContentTaskToggle(\'' + partnershipId + '\',\'' + field + '\',this.checked,this)"> Done' +
+      '</label></div>';
+  }
+
+  function handleContentTaskToggle(partnershipId, field, done, checkboxEl) {
+    checkboxEl.disabled = true;
+    callServer('setContentTaskDone', currentToken, partnershipId, field, done)
+      .catch(err => {
+        checkboxEl.checked = !done;
+        alert((err && err.message) ? err.message : 'Could not update task.');
+      })
+      .then(() => { checkboxEl.disabled = false; });
+  }
+
   function renderPartnerships(items, grid, isExperiencesView) {
     items = Array.isArray(items) ? items : [];
     if (!items.length) {
@@ -382,9 +414,9 @@
         : it.status === 'Cancelled' ? 'status-cancelled' : 'status-pending';
 
       const contentTags = [];
-      if (it.posts > 0) contentTags.push(it.posts + ' Post' + (it.posts > 1 ? 's' : ''));
-      if (it.reels > 0) contentTags.push(it.reels + ' Reels');
-      if (it.stories > 0) contentTags.push(it.stories + ' Story');
+      if (it.posts > 0) contentTags.push(it.posts + ' Post' + (it.posts > 1 ? 's' : '') + (it.postsDone ? ' ✓' : ''));
+      if (it.reels > 0) contentTags.push(it.reels + ' Reels' + (it.reelsDone ? ' ✓' : ''));
+      if (it.stories > 0) contentTags.push(it.stories + ' Story' + (it.storiesDone ? ' ✓' : ''));
 
       const benefitTags = (it.benefits || '').split(',').map(b => b.trim()).filter(Boolean);
 
@@ -395,11 +427,38 @@
       if (it.canUploadContent) {
         actions += '<button class="edit-btn" onclick=\'openUploadModal(' + JSON.stringify(it).replace(/'/g, "&#39;") + ')\'>Upload Content</button>';
       }
+      if (isExperiencesView && it.status === 'Approved') {
+        actions += '<button class="edit-btn" onclick=\'openExperienceModal(' + JSON.stringify(it).replace(/'/g, "&#39;") + ')\'>' +
+          ((it.feelingRating || it.overallRating || it.satisfactionRating) ? 'Edit Experience' : 'Add Experience') + '</button>';
+      }
+      if (it.canEdit) {
+        actions += '<button class="edit-btn" onclick=\'openEditPartnershipModal(' + JSON.stringify(it).replace(/'/g, "&#39;") + ')\'>Edit</button>';
+      }
       if (it.canCancel) {
         actions += '<button class="edit-btn" style="color:var(--danger);margin-left:12px;" onclick="handleCancelPartnership(\'' + it.id + '\')">Cancel</button>';
       }
 
-      const showContentProgress = it.status === 'Approved';
+      const showContentProgress = it.status === 'Approved' && (it.maxImages > 0 || it.maxVideos > 0);
+      const deadlineHtml = it.deadlineDate
+        ? '<div class="info-row"><span>Content deadline</span><span' + (it.isOverdue ? ' style="color:var(--danger);font-weight:700;"' : '') + '>' + formatDateUS(it.deadlineDate) + (it.isOverdue ? ' — Overdue' : '') + '</span></div>'
+        : '';
+
+      const experienceHtml = (it.status === 'Approved' && (it.feelingRating || it.overallRating || it.satisfactionRating || it.experienceNotes))
+        ? '<div class="content-progress">' +
+            '<b>Creator feedback</b> — Feeling: ' + (it.feelingRating || '—') + '/5, Overall: ' + (it.overallRating || '—') + '/5, Satisfaction: ' + (it.satisfactionRating || '—') + '/5' +
+            (it.experienceNotes ? '<div style="margin-top:4px;">' + escapeHtml(it.experienceNotes) + '</div>' : '') +
+          '</div>'
+        : '';
+
+      let contentPackageHtml = '';
+      if (isExperiencesView && it.status === 'Approved') {
+        contentPackageHtml =
+          renderContentTaskRow('Post' + (it.posts > 1 ? 's' : ''), it.posts, it.postsDone, it.id, 'posts') +
+          renderContentTaskRow('Reels', it.reels, it.reelsDone, it.id, 'reels') +
+          renderContentTaskRow('Story', it.stories, it.storiesDone, it.id, 'stories');
+      } else if (contentTags.length) {
+        contentPackageHtml = '<div class="tag-row">' + contentTags.map(c => '<span class="tag">' + escapeHtml(c) + '</span>').join('') + '</div>';
+      }
 
       return '' +
         '<div class="creator-card">' +
@@ -411,33 +470,72 @@
           '<div class="info-row"><span>Date</span><span>' + formatDateUS(it.visitDate) + (it.visitTime ? ' · ' + escapeHtml(it.visitTime) : '') + '</span></div>' +
           '<div class="info-row"><span>People</span><span>' + escapeHtml(String(it.peopleCount)) + '</span></div>' +
           '<div class="info-row"><span>Upload deadline</span><span>' + escapeHtml(it.uploadDeadline) + '</span></div>' +
+          deadlineHtml +
           (benefitTags.length ? '<div class="tag-row">' + benefitTags.map(b => '<span class="tag">' + escapeHtml(b) + '</span>').join('') + '</div>' : '') +
-          (contentTags.length ? '<div class="tag-row">' + contentTags.map(c => '<span class="tag">' + escapeHtml(c) + '</span>').join('') + '</div>' : '') +
+          contentPackageHtml +
           (it.status === 'Cancelled' && it.cancelledBy ? '<div class="info-row"><span>Cancelled by</span><span>' + escapeHtml(it.cancelledBy) + '</span></div>' : '') +
           (it.status === 'Approved' && it.pregnancyDeclaration ? '<div class="info-row"><span>Pregnancy declaration</span><span>' + escapeHtml(it.pregnancyDeclaration) + '</span></div>' : '') +
           (showContentProgress ? '<div class="content-progress">Content uploaded: <b>' + it.contentImages + '/' + it.maxImages + '</b> photos, <b>' + it.contentVideos + '/' + it.maxVideos + '</b> videos</div>' : '') +
+          experienceHtml +
           (actions ? '<div class="card-footer">' + actions + '</div>' : '') +
         '</div>';
     }).join('');
   }
 
+  // Loads (and renders) the benefits checklist for a given branch, optionally
+  // re-checking any values found in preselected (used when opening for edit).
+  function populateBenefitsChecklist(branchId, preselected) {
+    const list = document.getElementById('npBenefitsList');
+    if (!branchId) {
+      list.innerHTML = '<div class="empty-state" style="padding:20px;">Select a spa branch first.</div>';
+      return Promise.resolve();
+    }
+    list.innerHTML = '<div class="empty-state" style="padding:20px;">Loading benefits...</div>';
+
+    return callServer('getActiveBenefitsForBranch', currentToken, branchId).then(benefits => {
+      benefits = Array.isArray(benefits) ? benefits : [];
+      const preselectedSet = Array.isArray(preselected) ? preselected : [];
+
+      list.innerHTML = benefits.length
+        ? benefits.map(b => {
+            const value = b.treatment + ' (' + b.duration + ')';
+            const checked = preselectedSet.indexOf(value) !== -1 ? ' checked' : '';
+            return '<label><input type="checkbox" class="npBenefitChk" value="' + escapeHtml(value) + '"' + checked + '> ' + escapeHtml(b.treatment) + ' — ' + escapeHtml(b.duration) + '</label>';
+          }).join('')
+        : '<div class="empty-state" style="padding:20px;">This branch has no active benefits matching its activities yet.</div>';
+    });
+  }
+
+  function onPartnershipBranchChange() {
+    populateBenefitsChecklist(document.getElementById('npBranch').value, []);
+  }
+
   function openCreatePartnershipModal() {
+    const openBtn = document.getElementById('newPartnershipBtn');
+    const originalLabel = openBtn.textContent;
+    openBtn.disabled = true;
+    openBtn.innerHTML = '<span class="spinner"></span>Loading...';
+
+    document.getElementById('partnershipModalTitle').textContent = 'New Partnership';
+    document.getElementById('npPartnershipId').value = '';
+    document.getElementById('npSaveBtn').textContent = 'Send to Creator';
     document.getElementById('npMsg').textContent = '';
     document.getElementById('npDate').value = '';
     document.getElementById('npTime').value = '';
     document.getElementById('npPeople').value = '1';
     document.getElementById('npDeadline').value = '';
+    document.getElementById('npRequiredPhotos').value = '5';
+    document.getElementById('npRequiredVideos').value = '3';
+    document.getElementById('npCreator').disabled = false;
     ['npPostChk','npReelsChk','npStoryChk'].forEach(id => document.getElementById(id).checked = false);
     ['npPostQty','npReelsQty','npStoryQty'].forEach(id => { document.getElementById(id).value = ''; document.getElementById(id).disabled = true; });
 
     Promise.all([
       callServer('getContentCreatorsList', currentToken),
-      callServer('getActiveSpaBranchesList', currentToken),
-      callServer('getActiveBenefitsList', currentToken)
-    ]).then(([creators, branches, benefits]) => {
+      callServer('getActiveSpaBranchesList', currentToken)
+    ]).then(([creators, branches]) => {
       creators = Array.isArray(creators) ? creators : [];
       branches = Array.isArray(branches) ? branches : [];
-      benefits = Array.isArray(benefits) ? benefits : [];
 
       document.getElementById('npCreator').innerHTML = '<option value="" disabled selected>Select a content creator...</option>' +
         (creators.length
@@ -449,14 +547,55 @@
           ? branches.map(b => '<option value="' + escapeHtml(b.id) + '">' + escapeHtml(b.name) + '</option>').join('')
           : '');
 
-      const list = document.getElementById('npBenefitsList');
-      list.innerHTML = benefits.length
-        ? benefits.map(b => '<label><input type="checkbox" class="npBenefitChk" value="' + escapeHtml(b.treatment + ' (' + b.duration + ')') + '"> ' + escapeHtml(b.treatment) + ' — ' + escapeHtml(b.duration) + '</label>').join('')
-        : '<div class="empty-state" style="padding:20px;">No active benefits defined yet.</div>';
+      document.getElementById('npBenefitsList').innerHTML = '<div class="empty-state" style="padding:20px;">Select a spa branch first.</div>';
 
+      openBtn.disabled = false;
+      openBtn.textContent = originalLabel;
       document.getElementById('partnershipModal').classList.add('active');
     }).catch(err => {
-      document.getElementById('npMsg').textContent = (err && err.message) ? err.message : 'Could not load form data. Please try again.';
+      openBtn.disabled = false;
+      openBtn.textContent = originalLabel;
+      alert((err && err.message) ? err.message : 'Could not load form data. Please try again.');
+    });
+  }
+
+  function openEditPartnershipModal(item) {
+    document.getElementById('partnershipModalTitle').textContent = 'Edit Partnership';
+    document.getElementById('npPartnershipId').value = item.id;
+    document.getElementById('npSaveBtn').textContent = 'Save Changes';
+    document.getElementById('npMsg').textContent = '';
+    document.getElementById('npDate').value = item.visitDate || '';
+    document.getElementById('npTime').value = item.visitTime || '';
+    document.getElementById('npPeople').value = item.peopleCount || 1;
+    document.getElementById('npDeadline').value = item.uploadDeadline || '';
+    document.getElementById('npRequiredPhotos').value = item.maxImages || 0;
+    document.getElementById('npRequiredVideos').value = item.maxVideos || 0;
+
+    document.getElementById('npPostChk').checked = item.posts > 0;
+    document.getElementById('npPostQty').value = item.posts > 0 ? item.posts : '';
+    document.getElementById('npPostQty').disabled = !(item.posts > 0);
+    document.getElementById('npReelsChk').checked = item.reels > 0;
+    document.getElementById('npReelsQty').value = item.reels > 0 ? item.reels : '';
+    document.getElementById('npReelsQty').disabled = !(item.reels > 0);
+    document.getElementById('npStoryChk').checked = item.stories > 0;
+    document.getElementById('npStoryQty').value = item.stories > 0 ? item.stories : '';
+    document.getElementById('npStoryQty').disabled = !(item.stories > 0);
+
+    callServer('getActiveSpaBranchesList', currentToken).then(branches => {
+      branches = Array.isArray(branches) ? branches : [];
+      document.getElementById('npCreator').innerHTML = '<option value="' + escapeHtml(item.creatorEmail) + '">' + escapeHtml(item.creatorName) + '</option>';
+      document.getElementById('npCreator').disabled = true;
+
+      document.getElementById('npBranch').innerHTML = branches.map(b =>
+        '<option value="' + escapeHtml(b.id) + '"' + (b.id === item.branchId ? ' selected' : '') + '>' + escapeHtml(b.name) + '</option>'
+      ).join('');
+
+      const preselectedBenefits = (item.benefits || '').split(',').map(b => b.trim()).filter(Boolean);
+      return populateBenefitsChecklist(item.branchId, preselectedBenefits);
+    }).then(() => {
+      document.getElementById('partnershipModal').classList.add('active');
+    }).catch(err => {
+      alert((err && err.message) ? err.message : 'Could not load form data. Please try again.');
     });
   }
 
@@ -472,7 +611,8 @@
     document.getElementById('partnershipModal').classList.remove('active');
   }
 
-  function handleCreatePartnership() {
+  function handleSavePartnership() {
+    const partnershipId = document.getElementById('npPartnershipId').value;
     const benefits = Array.from(document.querySelectorAll('.npBenefitChk:checked')).map(el => el.value);
 
     const data = {
@@ -485,29 +625,36 @@
       posts: document.getElementById('npPostChk').checked ? (document.getElementById('npPostQty').value || 0) : 0,
       reels: document.getElementById('npReelsChk').checked ? (document.getElementById('npReelsQty').value || 0) : 0,
       stories: document.getElementById('npStoryChk').checked ? (document.getElementById('npStoryQty').value || 0) : 0,
+      requiredPhotos: document.getElementById('npRequiredPhotos').value || 0,
+      requiredVideos: document.getElementById('npRequiredVideos').value || 0,
       uploadDeadline: document.getElementById('npDeadline').value
     };
 
-    if (!data.creatorEmail) { document.getElementById('npMsg').textContent = 'Please select a content creator.'; return; }
+    if (!partnershipId && !data.creatorEmail) { document.getElementById('npMsg').textContent = 'Please select a content creator.'; return; }
     if (!data.branchId) { document.getElementById('npMsg').textContent = 'Please select a spa branch.'; return; }
     if (!data.visitDate) { document.getElementById('npMsg').textContent = 'Please select a visit date.'; return; }
     if (!data.uploadDeadline) { document.getElementById('npMsg').textContent = 'Please select an upload deadline.'; return; }
 
     const btn = document.getElementById('npSaveBtn');
+    const originalLabel = btn.textContent;
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span>Sending...';
+    btn.innerHTML = '<span class="spinner"></span>Saving...';
 
-    callServer('createPartnership', currentToken, data)
+    const action = partnershipId
+      ? callServer('updatePartnership', currentToken, partnershipId, data)
+      : callServer('createPartnership', currentToken, data);
+
+    action
       .then(() => {
         btn.disabled = false;
-        btn.textContent = 'Send to Creator';
+        btn.textContent = originalLabel;
         closePartnershipModal();
         loadPartnerships();
       })
       .catch(err => {
         btn.disabled = false;
-        btn.textContent = 'Send to Creator';
-        document.getElementById('npMsg').textContent = (err && err.message) ? err.message : 'Could not create partnership.';
+        btn.textContent = originalLabel;
+        document.getElementById('npMsg').textContent = (err && err.message) ? err.message : 'Could not save partnership.';
       });
   }
 
@@ -629,6 +776,7 @@
             '<span class="status-pill ' + (b.status === 'Active' ? 'status-active' : 'status-inactive') + '">' + escapeHtml(b.status) + '</span>' +
           '</div>' +
           '<div class="info-row"><span>Duration</span><span>' + escapeHtml(b.duration) + '</span></div>' +
+          (b.activityType ? '<div class="tag-row"><span class="tag">' + escapeHtml(b.activityType) + '</span></div>' : '') +
           '<div class="card-footer"><button class="edit-btn" onclick=\'openBenefitModal(' + JSON.stringify(b).replace(/'/g, "&#39;") + ')\'>Edit</button></div>' +
         '</div>'
       ).join('');
@@ -641,6 +789,7 @@
     document.getElementById('benefitId').value = benefit ? benefit.id : '';
     document.getElementById('bfTreatment').value = benefit ? benefit.treatment : '';
     document.getElementById('bfDuration').value = benefit ? benefit.duration : '';
+    document.getElementById('bfActivityType').value = benefit ? (benefit.activityType || '') : '';
     document.getElementById('bfStatus').value = benefit ? benefit.status : 'Active';
     document.getElementById('benefitModal').classList.add('active');
   }
@@ -654,10 +803,12 @@
     const data = {
       treatment: document.getElementById('bfTreatment').value.trim(),
       duration: document.getElementById('bfDuration').value.trim(),
+      activityType: document.getElementById('bfActivityType').value,
       status: document.getElementById('bfStatus').value
     };
     if (!data.treatment) { document.getElementById('benefitMsg').textContent = 'Treatment name is required.'; return; }
     if (!data.duration) { document.getElementById('benefitMsg').textContent = 'Duration is required.'; return; }
+    if (!data.activityType) { document.getElementById('benefitMsg').textContent = 'Please select which activity this benefit belongs to.'; return; }
 
     const btn = document.getElementById('benefitSaveBtn');
     btn.disabled = true;
@@ -960,6 +1111,8 @@
 
     document.getElementById('uploadCurrentProgress').innerHTML =
       'Already uploaded: <b>' + item.contentImages + '/' + item.maxImages + '</b> photos, <b>' + item.contentVideos + '/' + item.maxVideos + '</b> videos';
+    document.getElementById('uploadImagesHint').textContent = item.maxImages + ' photo(s) required for this partnership (' + uploadRemainingImages + ' remaining)';
+    document.getElementById('uploadVideosHint').textContent = item.maxVideos + ' video(s) required for this partnership (' + uploadRemainingVideos + ' remaining). Large videos may take a while to upload.';
     document.getElementById('uploadImagesInput').value = '';
     document.getElementById('uploadVideosInput').value = '';
     document.getElementById('uploadProgressList').innerHTML = '';
@@ -970,6 +1123,54 @@
 
   function closeUploadModal() {
     document.getElementById('uploadModal').classList.remove('active');
+  }
+
+  /* ------------------------- EXPERIENCE FEEDBACK ---------------------- */
+
+  function openExperienceModal(item) {
+    document.getElementById('expPartnershipId').value = item.id;
+    document.getElementById('expFeeling').value = item.feelingRating || '';
+    document.getElementById('expOverall').value = item.overallRating || '';
+    document.getElementById('expSatisfaction').value = item.satisfactionRating || '';
+    document.getElementById('expNotes').value = item.experienceNotes || '';
+    document.getElementById('expMsg').textContent = '';
+    document.getElementById('experienceModal').classList.add('active');
+  }
+
+  function closeExperienceModal() {
+    document.getElementById('experienceModal').classList.remove('active');
+  }
+
+  function handleSaveExperience() {
+    const id = document.getElementById('expPartnershipId').value;
+    const data = {
+      feelingRating: document.getElementById('expFeeling').value,
+      overallRating: document.getElementById('expOverall').value,
+      satisfactionRating: document.getElementById('expSatisfaction').value,
+      notes: document.getElementById('expNotes').value.trim()
+    };
+
+    if (!data.feelingRating || !data.overallRating || !data.satisfactionRating) {
+      document.getElementById('expMsg').textContent = 'Please rate all three questions.';
+      return;
+    }
+
+    const btn = document.getElementById('expSaveBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Submitting...';
+
+    callServer('submitExperienceFeedback', currentToken, id, data)
+      .then(() => {
+        btn.disabled = false;
+        btn.textContent = 'Submit';
+        closeExperienceModal();
+        loadExperiences();
+      })
+      .catch(err => {
+        btn.disabled = false;
+        btn.textContent = 'Submit';
+        document.getElementById('expMsg').textContent = (err && err.message) ? err.message : 'Could not save your experience.';
+      });
   }
 
   function fileToBase64(file) {
