@@ -707,10 +707,102 @@ function getPendingApprovalCount(token) {
   ).length;
 }
 
+/*******************  AI CONTENT ANALYSIS  **************/
+// Calls Claude (Anthropic Messages API) to analyze an uploaded photo — or,
+// for a video, 3 frames captured client-side — and returns a structured
+// set of fields for the Library Content sheet. The API key lives in
+// Script Properties as ANTHROPIC_API_KEY (never in code).
+
+const AI_SCENE_TYPES = ['Massage', 'Pool', 'Jacuzzi', 'Sauna', 'Reception', 'Treatment', 'Other'];
+const AI_MOOD_TAGS = ['Relaxing', 'Luxurious', 'Energetic', 'Cozy', 'Bright', 'Romantic', 'Natural'];
+
+function buildAiAnalysisPrompt_() {
+  return 'You are analyzing marketing content for a spa business. ' +
+    'The image(s) attached show a single piece of content — for a video these are several frames sampled from the same clip, so treat them together as one item. ' +
+    'Return ONLY a valid JSON object, with no extra text before or after it and no markdown code fences, in exactly this shape:\n' +
+    '{\n' +
+    '  "sceneType": one value from ' + JSON.stringify(AI_SCENE_TYPES) + ',\n' +
+    '  "qualityScore": integer from 1 to 5 rating technical quality (focus, lighting, framing),\n' +
+    '  "moodTags": array of 1 to 3 values from ' + JSON.stringify(AI_MOOD_TAGS) + ',\n' +
+    '  "description": a short factual 1-2 sentence description in English,\n' +
+    '  "suggestedCaption": a short marketing-ready caption in English,\n' +
+    '  "keywords": array of 4 to 6 short search keywords in English\n' +
+    '}';
+}
+
+function parseAiAnalysisJson_(text) {
+  let clean = String(text || '').trim();
+  clean = clean.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+  const parsed = JSON.parse(clean);
+
+  return {
+    sceneType: AI_SCENE_TYPES.indexOf(parsed.sceneType) !== -1 ? parsed.sceneType : String(parsed.sceneType || ''),
+    qualityScore: Number(parsed.qualityScore) || '',
+    moodTags: Array.isArray(parsed.moodTags) ? parsed.moodTags.join(', ') : '',
+    description: String(parsed.description || ''),
+    suggestedCaption: String(parsed.suggestedCaption || ''),
+    keywords: Array.isArray(parsed.keywords) ? parsed.keywords.join(', ') : ''
+  };
+}
+
+function callClaudeVision_(imageBlocks) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+  if (!apiKey) throw new Error('Missing ANTHROPIC_API_KEY in Script Properties.');
+
+  const content = imageBlocks.concat([{ type: 'text', text: buildAiAnalysisPrompt_() }]);
+
+  const payload = {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 700,
+    messages: [{ role: 'user', content: content }]
+  };
+
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', options);
+  const code = response.getResponseCode();
+  const body = JSON.parse(response.getContentText());
+
+  if (code !== 200) {
+    const msg = (body && body.error && body.error.message) ? body.error.message : ('HTTP ' + code);
+    throw new Error('Claude API error: ' + msg);
+  }
+
+  const text = (body.content && body.content[0] && body.content[0].text) ? body.content[0].text : '';
+  return parseAiAnalysisJson_(text);
+}
+
+// f: { mimeType, base64 (the file itself), frames: [base64,...] (video only), contentType }
+function analyzeContentWithAI_(f) {
+  let imageBlocks;
+
+  if (f.contentType === 'Video' && Array.isArray(f.frames) && f.frames.length) {
+    imageBlocks = f.frames.map(b64 => ({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/jpeg', data: b64 }
+    }));
+  } else {
+    imageBlocks = [{
+      type: 'image',
+      source: { type: 'base64', media_type: f.mimeType || 'image/jpeg', data: f.base64 }
+    }];
+  }
+
+  return callClaudeVision_(imageBlocks);
+}
+
 /*******************  LIBRARY CONTENT (UPLOADS)  ********/
 // Library Content sheet columns:
 // ContentID | PartnershipID | CreatorEmail | CreatorName | BranchID | BranchName |
-// VisitDate | ContentType | FileName | DriveFileId | FileUrl | UploadedAt | UploadedBy
+// VisitDate | ContentType | FileName | DriveFileId | FileUrl | UploadedAt | UploadedBy |
+// AI Scene Type | AI Quality Score | AI Mood Tags | AI Description | AI Suggested Caption |
+// AI Keywords | AI Analysis Status | AI Analyzed At
 //
 // Files are uploaded by the content creator (after approving the partnership),
 // stored in a per-partnership subfolder inside LIBRARY_DRIVE_FOLDER_ID, and
@@ -802,8 +894,32 @@ function uploadPartnershipContent(token, partnershipId, files) {
       file.getId(),
       file.getUrl(),
       new Date(),
-      user.email
+      user.email,
+      '', '', '', '', '', '', // AI Scene Type..AI Keywords — filled in below
+      'Pending',
+      ''
     ]);
+
+    const rowNum = librarySheet.getLastRow();
+
+    try {
+      const analysis = analyzeContentWithAI_(f);
+      librarySheet.getRange(rowNum, 14, 1, 8).setValues([[
+        analysis.sceneType,
+        analysis.qualityScore,
+        analysis.moodTags,
+        analysis.description,
+        analysis.suggestedCaption,
+        analysis.keywords,
+        'Completed',
+        new Date()
+      ]]);
+    } catch (aiError) {
+      const errMsg = 'ERROR: ' + ((aiError && aiError.message) ? aiError.message : String(aiError));
+      librarySheet.getRange(rowNum, 14, 1, 8).setValues([[
+        '', '', '', errMsg, '', '', 'Failed', new Date()
+      ]]);
+    }
   });
 
   return getPartnershipContentSummary(token, partnershipId);
@@ -827,7 +943,8 @@ function getLibraryFilterOptions(token) {
 
   return {
     creators: Object.keys(creators).map(email => ({ email: email, name: creators[email] })).sort((a, b) => a.name.localeCompare(b.name)),
-    branches: Object.keys(branches).map(id => ({ id: id, name: branches[id] })).sort((a, b) => a.name.localeCompare(b.name))
+    branches: Object.keys(branches).map(id => ({ id: id, name: branches[id] })).sort((a, b) => a.name.localeCompare(b.name)),
+    sceneTypes: AI_SCENE_TYPES
   };
 }
 
@@ -849,6 +966,9 @@ function getLibraryContent(token, filters) {
   if (filters.date) {
     items = items.filter(it => safeDateStr(it.VisitDate) === filters.date);
   }
+  if (filters.sceneType) {
+    items = items.filter(it => it['AI Scene Type'] === filters.sceneType);
+  }
 
   items.sort((a, b) => new Date(b.UploadedAt) - new Date(a.UploadedAt));
 
@@ -861,6 +981,13 @@ function getLibraryContent(token, filters) {
     fileName: String(it.FileName || ''),
     fileUrl: String(it.FileUrl || ''),
     thumbUrl: it.DriveFileId ? ('https://drive.google.com/thumbnail?id=' + it.DriveFileId + '&sz=w500') : '',
-    uploadedAt: it.UploadedAt ? Utilities.formatDate(new Date(it.UploadedAt), Session.getScriptTimeZone(), 'yyyy-MM-dd') : ''
+    uploadedAt: it.UploadedAt ? Utilities.formatDate(new Date(it.UploadedAt), Session.getScriptTimeZone(), 'yyyy-MM-dd') : '',
+    aiSceneType: String(it['AI Scene Type'] || ''),
+    aiQualityScore: it['AI Quality Score'] || '',
+    aiMoodTags: String(it['AI Mood Tags'] || ''),
+    aiDescription: String(it['AI Description'] || ''),
+    aiSuggestedCaption: String(it['AI Suggested Caption'] || ''),
+    aiKeywords: String(it['AI Keywords'] || ''),
+    aiStatus: String(it['AI Analysis Status'] || '')
   }));
 }
