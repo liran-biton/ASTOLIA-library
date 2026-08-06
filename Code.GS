@@ -11,8 +11,6 @@ const PARTNERSHIPS_SHEET = 'Partnerships';
 const LIBRARY_SHEET      = 'Library Content';
 
 const LIBRARY_DRIVE_FOLDER_ID = '1Jrp_IGU5xi873QN1-EHo0qhkHv5r33Vw';
-const MAX_IMAGES_PER_PARTNERSHIP = 5;
-const MAX_VIDEOS_PER_PARTNERSHIP = 3;
 
 const SESSION_DAYS = 30;   // session length after a successful login
 
@@ -27,6 +25,8 @@ const PARTNERSHIP_STATUS = {
   APPROVED : 'Approved',
   CANCELLED: 'Cancelled'
 };
+
+const ACTIVITY_TYPES = ['Swedish Massage', 'Reflexology', 'Pool Area', 'Jacuzzi', 'Sauna'];
 
 /*******************  WEB APP ENTRY  *******************/
 
@@ -161,7 +161,7 @@ function parseBool(v) {
 
 /*******************  DIGITAL CREATOR  ******************/
 // Digital Creator sheet columns (in this exact order):
-// ProfileID | Name | Email | Phone | City | About | Instagram | Facebook | YouTube | CreatedBy | CreatedAt
+// ProfileID | Name | Email | Phone | City | About | Instagram | Facebook | YouTube | CreatedBy | CreatedAt | Status
 
 function canCreateProfile(user) {
   if (user.role === ROLES.EDITOR || user.role === ROLES.ADMIN) return true;
@@ -171,6 +171,23 @@ function canCreateProfile(user) {
     return !has;
   }
   return false;
+}
+
+// Builds { creatorEmail: { pending, approved, cancelled } } from the Partnerships
+// sheet in one read, so profile cards can show a quick status breakdown.
+function getPartnershipCountsByCreator_() {
+  const items = sheetToObjects(getSheet(PARTNERSHIPS_SHEET));
+  const map = {};
+  items.forEach(it => {
+    const email = String(it.CreatorEmail || '').trim().toLowerCase();
+    if (!email) return;
+    if (!map[email]) map[email] = { pending: 0, approved: 0, cancelled: 0 };
+    const status = String(it.Status || '').trim();
+    if (status === PARTNERSHIP_STATUS.PENDING) map[email].pending++;
+    else if (status === PARTNERSHIP_STATUS.APPROVED) map[email].approved++;
+    else if (status === PARTNERSHIP_STATUS.CANCELLED) map[email].cancelled++;
+  });
+  return map;
 }
 
 function getDigitalCreators(token, filters) {
@@ -198,21 +215,30 @@ function getDigitalCreators(token, filters) {
     (user.role !== ROLES.CREATOR) ||
     (String(it.Email).trim().toLowerCase() === String(user.email).trim().toLowerCase());
 
+  const partnershipCounts = getPartnershipCountsByCreator_();
+
   return {
     role: user.role,
     canCreate: canCreateProfile(user),
-    items: items.map(it => ({
-      id: it.ProfileID,
-      name: it.Name || '',
-      email: it.Email || '',
-      phone: it.Phone || '',
-      city: it.City || '',
-      about: it.About || '',
-      instagram: it.Instagram || '',
-      facebook: it.Facebook || '',
-      youtube: it.YouTube || '',
-      canEdit: canEditItem(it)
-    }))
+    items: items.map(it => {
+      const counts = partnershipCounts[String(it.Email || '').trim().toLowerCase()] || { pending: 0, approved: 0, cancelled: 0 };
+      return {
+        id: it.ProfileID,
+        name: it.Name || '',
+        email: it.Email || '',
+        phone: it.Phone || '',
+        city: it.City || '',
+        about: it.About || '',
+        instagram: it.Instagram || '',
+        facebook: it.Facebook || '',
+        youtube: it.YouTube || '',
+        status: it.Status || 'Active',
+        canEdit: canEditItem(it),
+        pendingCount: counts.pending,
+        approvedCount: counts.approved,
+        cancelledCount: counts.cancelled
+      };
+    })
   };
 }
 
@@ -252,7 +278,8 @@ function createDigitalCreatorProfile(token, data) {
     data.facebook || '',
     data.youtube || '',
     user.email,
-    new Date()
+    new Date(),
+    data.status === 'Inactive' ? 'Inactive' : 'Active'
   ]);
 
   return { success: true, id: id };
@@ -290,6 +317,7 @@ function updateDigitalCreatorProfile(token, id, data) {
   setCell('Instagram', data.instagram || '');
   setCell('Facebook', data.facebook || '');
   setCell('YouTube', data.youtube || '');
+  setCell('Status', data.status === 'Inactive' ? 'Inactive' : 'Active');
 
   return { success: true };
 }
@@ -386,7 +414,10 @@ function updateSpaBranch(token, id, data) {
 }
 
 /*******************  BENEFITS PACKAGE  *****************/
-// Benefits sheet columns: BenefitID | Treatment | Duration | Status
+// Benefits sheet columns: BenefitID | Treatment | Duration | Status | Activity Type
+// Activity Type must be one of ACTIVITY_TYPES — links the benefit to the spa
+// activity it belongs to, so a partnership only offers benefits the chosen
+// branch actually has (e.g. don't offer Pool Area if the branch has no pool).
 // (Admin + Video Editor only)
 
 function mapBenefit(it) {
@@ -394,7 +425,8 @@ function mapBenefit(it) {
     id: it.BenefitID,
     treatment: it.Treatment || '',
     duration: it.Duration || '',
-    status: it.Status || 'Active'
+    status: it.Status || 'Active',
+    activityType: it['Activity Type'] || ''
   };
 }
 
@@ -413,15 +445,34 @@ function getActiveBenefitsList(token) {
   return items.map(mapBenefit);
 }
 
+// Only the active benefits whose Activity Type is actually available at the
+// given branch (per its Swedish Massage/Reflexology/Pool Area/Jacuzzi/Sauna flags).
+function getActiveBenefitsForBranch(token, branchId) {
+  requirePrivileged(token);
+  const branch = sheetToObjects(getSheet(BRANCHES_SHEET)).find(b => b.BranchID === branchId);
+  if (!branch) return [];
+
+  const enabledActivities = {};
+  ACTIVITY_TYPES.forEach(a => { enabledActivities[a] = parseBool(branch[a]); });
+
+  const items = sheetToObjects(getSheet(BENEFITS_SHEET))
+    .filter(it => String(it.Status).trim().toLowerCase() === 'active')
+    .filter(it => enabledActivities[String(it['Activity Type'] || '').trim()] === true);
+
+  items.sort((a, b) => String(a.Treatment).localeCompare(String(b.Treatment)));
+  return items.map(mapBenefit);
+}
+
 function createBenefit(token, data) {
   requirePrivileged(token);
   data = data || {};
   if (!data.treatment || !String(data.treatment).trim()) throw new Error('Treatment name is required.');
   if (!data.duration || !String(data.duration).trim()) throw new Error('Duration is required.');
+  if (ACTIVITY_TYPES.indexOf(data.activityType) === -1) throw new Error('Please select which activity this benefit belongs to.');
 
   const sheet = getSheet(BENEFITS_SHEET);
   const id = Utilities.getUuid();
-  sheet.appendRow([id, data.treatment, data.duration, data.status || 'Active']);
+  sheet.appendRow([id, data.treatment, data.duration, data.status || 'Active', data.activityType]);
   return { success: true, id: id };
 }
 
@@ -430,6 +481,7 @@ function updateBenefit(token, id, data) {
   data = data || {};
   if (!data.treatment || !String(data.treatment).trim()) throw new Error('Treatment name is required.');
   if (!data.duration || !String(data.duration).trim()) throw new Error('Duration is required.');
+  if (ACTIVITY_TYPES.indexOf(data.activityType) === -1) throw new Error('Please select which activity this benefit belongs to.');
 
   const sheet = getSheet(BENEFITS_SHEET);
   const items = sheetToObjects(sheet);
@@ -446,6 +498,7 @@ function updateBenefit(token, id, data) {
   setCell('Treatment', data.treatment || '');
   setCell('Duration', data.duration || '');
   setCell('Status', data.status || 'Active');
+  setCell('Activity Type', data.activityType || '');
 
   return { success: true };
 }
@@ -479,7 +532,24 @@ function getContentCreatorsList(token) {
 // Partnerships sheet columns:
 // PartnershipID | CreatorEmail | CreatorName | BranchID | BranchName | VisitDate | VisitTime |
 // PeopleCount | Benefits | Posts | Reels | Stories | UploadDeadline | Status |
-// CreatedBy | CreatedAt | HealthConfirmed | PregnancyDeclaration | ApprovedAt | CancelledBy | CancelledAt
+// CreatedBy | CreatedAt | HealthConfirmed | PregnancyDeclaration | ApprovedAt | CancelledBy | CancelledAt |
+// RequiredPhotos | RequiredVideos | PostsDone | ReelsDone | StoriesDone |
+// FeelingRating | OverallRating | SatisfactionRating | ExperienceNotes
+
+// "Up to 1 week" / "Up to 2 weeks" / "Up to 1 month" -> actual deadline Date, from a visit date.
+function computeDeadlineDate_(visitDate, uploadDeadlineLabel) {
+  if (!visitDate) return null;
+  const base = (visitDate instanceof Date) ? new Date(visitDate) : new Date(visitDate);
+  if (isNaN(base.getTime())) return null;
+
+  const label = String(uploadDeadlineLabel || '').trim();
+  if (label === 'Up to 1 week') { base.setDate(base.getDate() + 7); }
+  else if (label === 'Up to 2 weeks') { base.setDate(base.getDate() + 14); }
+  else if (label === 'Up to 1 month') { base.setMonth(base.getMonth() + 1); }
+  else { return null; }
+
+  return base;
+}
 
 function createPartnership(token, data) {
   const user = requirePrivileged(token);
@@ -490,6 +560,11 @@ function createPartnership(token, data) {
   if (!data.visitDate) throw new Error('Please select a visit date.');
   if (!data.peopleCount || Number(data.peopleCount) < 1) throw new Error('Number of people must be at least 1.');
   if (!data.uploadDeadline) throw new Error('Please select an upload deadline.');
+
+  const requiredPhotos = Number(data.requiredPhotos) || 0;
+  const requiredVideos = Number(data.requiredVideos) || 0;
+  if (requiredPhotos < 0 || requiredPhotos > 20) throw new Error('Required photos must be between 0 and 20.');
+  if (requiredVideos < 0 || requiredVideos > 20) throw new Error('Required videos must be between 0 and 20.');
 
   const creator = getContentCreatorsList(token).find(c => c.email === data.creatorEmail);
   if (!creator) throw new Error('Selected content creator was not found or is inactive.');
@@ -523,10 +598,68 @@ function createPartnership(token, data) {
     '',
     '',
     '',
+    '',
+    requiredPhotos,
+    requiredVideos,
+    false,
+    false,
+    false,
+    '',
+    '',
+    '',
     ''
   ]);
 
   return { success: true, id: id };
+}
+
+function updatePartnership(token, id, data) {
+  const user = requirePrivileged(token);
+  data = data || {};
+
+  if (!data.branchId) throw new Error('Please select a spa branch.');
+  if (!data.visitDate) throw new Error('Please select a visit date.');
+  if (!data.peopleCount || Number(data.peopleCount) < 1) throw new Error('Number of people must be at least 1.');
+  if (!data.uploadDeadline) throw new Error('Please select an upload deadline.');
+
+  const requiredPhotos = Number(data.requiredPhotos) || 0;
+  const requiredVideos = Number(data.requiredVideos) || 0;
+  if (requiredPhotos < 0 || requiredPhotos > 20) throw new Error('Required photos must be between 0 and 20.');
+  if (requiredVideos < 0 || requiredVideos > 20) throw new Error('Required videos must be between 0 and 20.');
+
+  const branch = getActiveSpaBranchesList(token).find(b => b.id === data.branchId);
+  if (!branch) throw new Error('Selected spa branch is not available.');
+
+  const sheet = getSheet(PARTNERSHIPS_SHEET);
+  const items = sheetToObjects(sheet);
+  const target = items.find(it => it.PartnershipID === id);
+  if (!target) throw new Error('Partnership not found.');
+  if (String(target.Status).trim() === PARTNERSHIP_STATUS.CANCELLED) throw new Error('A cancelled partnership cannot be edited.');
+
+  const benefitsText = Array.isArray(data.benefits) ? data.benefits.join(', ') : '';
+  const visitDateObj = new Date(data.visitDate + 'T00:00:00');
+
+  const row = target._row;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  function setCell(col, value) {
+    const c = headers.indexOf(col) + 1;
+    if (c > 0) sheet.getRange(row, c).setValue(value);
+  }
+
+  setCell('BranchID', branch.id);
+  setCell('BranchName', branch.name);
+  setCell('VisitDate', visitDateObj);
+  setCell('VisitTime', data.visitTime || '');
+  setCell('PeopleCount', Number(data.peopleCount));
+  setCell('Benefits', benefitsText);
+  setCell('Posts', Number(data.posts) || 0);
+  setCell('Reels', Number(data.reels) || 0);
+  setCell('Stories', Number(data.stories) || 0);
+  setCell('UploadDeadline', data.uploadDeadline);
+  setCell('RequiredPhotos', requiredPhotos);
+  setCell('RequiredVideos', requiredVideos);
+
+  return { success: true };
 }
 
 // Safely turns a sheet date value (Date object, ISO/US string, or blank) into
@@ -576,10 +709,19 @@ function mapPartnership(it, user, contentCounts) {
   const isOwner = creatorEmail === String(user.email || '').trim().toLowerCase();
   const counts = contentCounts || { images: 0, videos: 0 };
 
+  const deadlineDate = computeDeadlineDate_(it.VisitDate, it.UploadDeadline);
+  const deadlineStr = deadlineDate ? safeDateStr(deadlineDate) : '';
+  const todayStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const isOverdue = !!(deadlineStr && deadlineStr < todayStr && status !== PARTNERSHIP_STATUS.CANCELLED);
+
+  const requiredPhotos = Number(it.RequiredPhotos) || 0;
+  const requiredVideos = Number(it.RequiredVideos) || 0;
+
   return {
     id: String(it.PartnershipID || ''),
     creatorEmail: String(it.CreatorEmail || ''),
     creatorName: String(it.CreatorName || ''),
+    branchId: String(it.BranchID || ''),
     branchName: String(it.BranchName || ''),
     visitDate: safeDateStr(it.VisitDate),
     visitTime: safeTimeStr(it.VisitTime),
@@ -589,18 +731,28 @@ function mapPartnership(it, user, contentCounts) {
     reels: Number(it.Reels) || 0,
     stories: Number(it.Stories) || 0,
     uploadDeadline: String(it.UploadDeadline || ''),
+    deadlineDate: deadlineStr,
+    isOverdue: isOverdue,
     status: status,
     healthConfirmed: parseBool(it.HealthConfirmed),
     pregnancyDeclaration: String(it.PregnancyDeclaration || ''),
     approvedAt: safeDateStr(it.ApprovedAt),
     cancelledBy: String(it.CancelledBy || ''),
     canCancel: privileged && status !== PARTNERSHIP_STATUS.CANCELLED,
+    canEdit: privileged && status !== PARTNERSHIP_STATUS.CANCELLED,
     canApprove: !privileged && isOwner && status === PARTNERSHIP_STATUS.PENDING,
     canUploadContent: !privileged && isOwner && status === PARTNERSHIP_STATUS.APPROVED,
     contentImages: counts.images,
     contentVideos: counts.videos,
-    maxImages: MAX_IMAGES_PER_PARTNERSHIP,
-    maxVideos: MAX_VIDEOS_PER_PARTNERSHIP
+    maxImages: requiredPhotos,
+    maxVideos: requiredVideos,
+    postsDone: parseBool(it.PostsDone),
+    reelsDone: parseBool(it.ReelsDone),
+    storiesDone: parseBool(it.StoriesDone),
+    feelingRating: it.FeelingRating || '',
+    overallRating: it.OverallRating || '',
+    satisfactionRating: it.SatisfactionRating || '',
+    experienceNotes: String(it.ExperienceNotes || '')
   };
 }
 
@@ -627,6 +779,12 @@ function getPartnerships(token, filters) {
       items = items.filter(it => safeDateStr(it.VisitDate) < todayStr && String(it.Status || '').trim() !== PARTNERSHIP_STATUS.CANCELLED);
     } else if (statusFilter === 'cancelled') {
       items = items.filter(it => String(it.Status || '').trim() === PARTNERSHIP_STATUS.CANCELLED);
+    } else if (statusFilter === 'overdue') {
+      items = items.filter(it => {
+        const deadline = computeDeadlineDate_(it.VisitDate, it.UploadDeadline);
+        const deadlineStr = deadline ? safeDateStr(deadline) : '';
+        return deadlineStr && deadlineStr < todayStr && String(it.Status || '').trim() !== PARTNERSHIP_STATUS.CANCELLED;
+      });
     }
     // statusFilter === 'all' -> no extra filtering
   }
@@ -693,6 +851,74 @@ function cancelPartnership(token, id) {
   setCell('Status', PARTNERSHIP_STATUS.CANCELLED);
   setCell('CancelledBy', user.email);
   setCell('CancelledAt', new Date());
+
+  return { success: true };
+}
+
+// field: 'posts' | 'reels' | 'stories'
+function setContentTaskDone(token, partnershipId, field, done) {
+  const user = requireSession(token);
+  if (user.role !== ROLES.CREATOR) throw new Error('Only content creators can update this.');
+
+  const fieldMap = { posts: 'PostsDone', reels: 'ReelsDone', stories: 'StoriesDone' };
+  const column = fieldMap[field];
+  if (!column) throw new Error('Unknown content type.');
+
+  const sheet = getSheet(PARTNERSHIPS_SHEET);
+  const items = sheetToObjects(sheet);
+  const target = items.find(it => it.PartnershipID === partnershipId);
+  if (!target) throw new Error('Partnership not found.');
+
+  if (String(target.CreatorEmail).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) {
+    throw new Error('You do not have permission to update this partnership.');
+  }
+  if (String(target.Status).trim() !== PARTNERSHIP_STATUS.APPROVED) {
+    throw new Error('This partnership is not approved.');
+  }
+
+  const row = target._row;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const c = headers.indexOf(column) + 1;
+  if (c > 0) sheet.getRange(row, c).setValue(!!done);
+
+  return { success: true };
+}
+
+function submitExperienceFeedback(token, partnershipId, data) {
+  const user = requireSession(token);
+  data = data || {};
+  if (user.role !== ROLES.CREATOR) throw new Error('Only content creators can share their experience.');
+
+  const feelingRating = Number(data.feelingRating);
+  const overallRating = Number(data.overallRating);
+  const satisfactionRating = Number(data.satisfactionRating);
+  [feelingRating, overallRating, satisfactionRating].forEach(v => {
+    if (!Number.isInteger(v) || v < 1 || v > 5) throw new Error('Please rate every question from 1 to 5.');
+  });
+
+  const sheet = getSheet(PARTNERSHIPS_SHEET);
+  const items = sheetToObjects(sheet);
+  const target = items.find(it => it.PartnershipID === partnershipId);
+  if (!target) throw new Error('Partnership not found.');
+
+  if (String(target.CreatorEmail).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) {
+    throw new Error('You do not have permission to update this partnership.');
+  }
+  if (String(target.Status).trim() !== PARTNERSHIP_STATUS.APPROVED) {
+    throw new Error('This partnership is not approved.');
+  }
+
+  const row = target._row;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  function setCell(col, value) {
+    const c = headers.indexOf(col) + 1;
+    if (c > 0) sheet.getRange(row, c).setValue(value);
+  }
+
+  setCell('FeelingRating', feelingRating);
+  setCell('OverallRating', overallRating);
+  setCell('SatisfactionRating', satisfactionRating);
+  setCell('ExperienceNotes', String(data.notes || '').slice(0, 1000));
 
   return { success: true };
 }
@@ -827,11 +1053,12 @@ function getOrCreatePartnershipFolder(partnership) {
 function getPartnershipContentSummary(token, partnershipId) {
   requireSession(token);
   const items = sheetToObjects(getSheet(LIBRARY_SHEET)).filter(it => String(it.PartnershipID) === String(partnershipId));
+  const partnership = sheetToObjects(getSheet(PARTNERSHIPS_SHEET)).find(it => String(it.PartnershipID) === String(partnershipId));
   return {
     images: items.filter(it => it.ContentType === 'Image').length,
     videos: items.filter(it => it.ContentType === 'Video').length,
-    maxImages: MAX_IMAGES_PER_PARTNERSHIP,
-    maxVideos: MAX_VIDEOS_PER_PARTNERSHIP
+    maxImages: partnership ? (Number(partnership.RequiredPhotos) || 0) : 0,
+    maxVideos: partnership ? (Number(partnership.RequiredVideos) || 0) : 0
   };
 }
 
@@ -857,6 +1084,9 @@ function uploadPartnershipContent(token, partnershipId, files) {
     throw new Error('You can upload content only after approving the partnership.');
   }
 
+  const requiredPhotos = Number(partnership.RequiredPhotos) || 0;
+  const requiredVideos = Number(partnership.RequiredVideos) || 0;
+
   const librarySheet = getSheet(LIBRARY_SHEET);
   const existing = sheetToObjects(librarySheet).filter(it => String(it.PartnershipID) === String(partnershipId));
   const existingImages = existing.filter(it => it.ContentType === 'Image').length;
@@ -865,11 +1095,11 @@ function uploadPartnershipContent(token, partnershipId, files) {
   const newImages = files.filter(f => f.contentType === 'Image').length;
   const newVideos = files.filter(f => f.contentType === 'Video').length;
 
-  if (existingImages + newImages > MAX_IMAGES_PER_PARTNERSHIP) {
-    throw new Error('You can upload up to ' + MAX_IMAGES_PER_PARTNERSHIP + ' photos per partnership (' + existingImages + ' already uploaded).');
+  if (existingImages + newImages > requiredPhotos) {
+    throw new Error('You can upload up to ' + requiredPhotos + ' photos for this partnership (' + existingImages + ' already uploaded).');
   }
-  if (existingVideos + newVideos > MAX_VIDEOS_PER_PARTNERSHIP) {
-    throw new Error('You can upload up to ' + MAX_VIDEOS_PER_PARTNERSHIP + ' videos per partnership (' + existingVideos + ' already uploaded).');
+  if (existingVideos + newVideos > requiredVideos) {
+    throw new Error('You can upload up to ' + requiredVideos + ' videos for this partnership (' + existingVideos + ' already uploaded).');
   }
 
   const folder = getOrCreatePartnershipFolder(partnership);
