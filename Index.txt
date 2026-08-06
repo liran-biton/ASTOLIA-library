@@ -418,6 +418,9 @@
           <select id="libBranchFilter" onchange="loadLibrary()">
             <option value="">All spa branches</option>
           </select>
+          <select id="libSceneFilter" onchange="loadLibrary()">
+            <option value="">All scene types</option>
+          </select>
           <input type="date" class="input" id="libDateFilter" onchange="loadLibrary()">
           <button class="btn-secondary-sm" onclick="clearLibraryFilters()">Clear filters</button>
         </div>
