@@ -1,0 +1,317 @@
+<script>
+  /*******************************************************
+   *  ASTOLIA LIBRARY — JavaScript.html
+   *  Client-side logic: auth, session, tabs, Digital Creator
+   *******************************************************/
+
+  const SESSION_KEY = 'astolia_session';
+  const ROLES = { CREATOR: 'Content Creator', EDITOR: 'Video Editor', ADMIN: 'Admin' };
+
+  let currentUser = null;   // { email, displayName, role }
+  let currentToken = null;
+  let searchDebounceTimer = null;
+
+  /* ---------------- google.script.run as Promise ---------------- */
+  function callServer(fn, ...args) {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(err => reject(err))
+        [fn](...args);
+    });
+  }
+
+  /* ------------------------- INIT -------------------------------- */
+  window.addEventListener('DOMContentLoaded', () => {
+    init();
+    const pwField = document.getElementById('passwordInput');
+    if (pwField) pwField.addEventListener('keydown', e => { if (e.key === 'Enter') handleLogin(); });
+  });
+
+  function init() {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return; // show login screen (default state)
+
+    let saved;
+    try { saved = JSON.parse(raw); } catch (e) { localStorage.removeItem(SESSION_KEY); return; }
+
+    if (!saved.token || !saved.expires || Date.now() > saved.expires) {
+      localStorage.removeItem(SESSION_KEY);
+      return;
+    }
+
+    currentToken = saved.token;
+    callServer('validateSession', currentToken)
+      .then(user => {
+        if (!user) { localStorage.removeItem(SESSION_KEY); return; }
+        currentUser = user;
+        enterApp();
+      })
+      .catch(() => localStorage.removeItem(SESSION_KEY));
+  }
+
+  /* ------------------------- LOGIN FLOW --------------------------- */
+
+  function setLoginMsg(text, type) {
+    const el = document.getElementById('loginMsg');
+    el.textContent = text || '';
+    el.className = 'msg' + (type ? ' ' + type : '');
+  }
+
+  function handleLogin() {
+    const username = document.getElementById('usernameInput').value.trim();
+    const password = document.getElementById('passwordInput').value;
+
+    if (!username || !password) {
+      setLoginMsg('Please enter username and password.', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('loginBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Signing in...';
+    setLoginMsg('', '');
+
+    callServer('login', username, password)
+      .then(res => {
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+        if (res.success) {
+          currentToken = res.token;
+          currentUser = res.user;
+          localStorage.setItem(SESSION_KEY, JSON.stringify({ token: res.token, expires: res.expires }));
+          enterApp();
+        } else {
+          setLoginMsg(res.message, 'error');
+        }
+      })
+      .catch(() => {
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+        setLoginMsg('Something went wrong. Please try again.', 'error');
+      });
+  }
+
+  function handleLogout() {
+    callServer('logoutSession', currentToken).finally(() => {
+      localStorage.removeItem(SESSION_KEY);
+      currentToken = null;
+      currentUser = null;
+      document.getElementById('appShell').classList.remove('active');
+      document.getElementById('loginScreen').style.display = 'flex';
+      document.getElementById('usernameInput').value = '';
+      document.getElementById('passwordInput').value = '';
+      setLoginMsg('', '');
+    });
+  }
+
+  /* ------------------------- APP SHELL ----------------------------- */
+
+  function enterApp() {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('appShell').classList.add('active');
+
+    document.getElementById('userChipName').textContent = currentUser.displayName || currentUser.email;
+    document.getElementById('userChipRole').textContent = currentUser.role;
+
+    applyRoleVisibility();
+    switchTab('digitalCreator');
+  }
+
+  function applyRoleVisibility() {
+    const role = currentUser.role;
+    const libraryTab = document.querySelector('.nav-item[data-tab="library"]');
+    const partnershipsTab = document.querySelector('.nav-item[data-tab="partnerships"]');
+
+    const isPrivileged = (role === ROLES.EDITOR || role === ROLES.ADMIN);
+    libraryTab.style.display = isPrivileged ? 'flex' : 'none';
+    partnershipsTab.style.display = isPrivileged ? 'flex' : 'none';
+  }
+
+  function switchTab(tab) {
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+    const navEl = document.querySelector('.nav-item[data-tab="' + tab + '"]');
+    if (navEl) navEl.classList.add('active');
+
+    document.querySelectorAll('.tab-page').forEach(el => el.style.display = 'none');
+    const pageEl = document.getElementById('page-' + tab);
+    if (pageEl) pageEl.style.display = 'block';
+
+    if (tab === 'digitalCreator') {
+      loadCities();
+      loadCreators();
+    }
+  }
+
+  /* ------------------------- DIGITAL CREATOR ------------------------ */
+
+  function loadCities() {
+    callServer('getCitiesList', currentToken).then(cities => {
+      const sel = document.getElementById('cityFilter');
+      const current = sel.value;
+      sel.innerHTML = '<option value="">All cities</option>' +
+        cities.map(c => '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>').join('');
+      sel.value = current;
+    }).catch(() => {});
+  }
+
+  function debouncedLoadCreators() {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(loadCreators, 300);
+  }
+
+  function loadCreators() {
+    const grid = document.getElementById('creatorsGrid');
+    grid.innerHTML = '<div class="empty-state">Loading profiles...</div>';
+
+    const filters = {
+      city: document.getElementById('cityFilter').value,
+      search: document.getElementById('searchFilter').value
+    };
+
+    callServer('getDigitalCreators', currentToken, filters)
+      .then(res => {
+        document.getElementById('createProfileBtn').classList.toggle('hidden', !res.canCreate);
+        renderCreators(res.items);
+      })
+      .catch(err => {
+        grid.innerHTML = '<div class="empty-state">Could not load profiles. Please refresh.</div>';
+      });
+  }
+
+  function renderCreators(items) {
+    const grid = document.getElementById('creatorsGrid');
+    if (!items.length) {
+      grid.innerHTML = '<div class="empty-state">No profiles found yet.</div>';
+      return;
+    }
+
+    grid.innerHTML = items.map(it => {
+      const initials = (it.name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+      const socials = [];
+      if (it.instagram) socials.push('<a class="social-link" href="' + escapeAttr(it.instagram) + '" target="_blank">Instagram</a>');
+      if (it.facebook)  socials.push('<a class="social-link" href="' + escapeAttr(it.facebook)  + '" target="_blank">Facebook</a>');
+      if (it.youtube)   socials.push('<a class="social-link" href="' + escapeAttr(it.youtube)   + '" target="_blank">YouTube</a>');
+
+      return '' +
+        '<div class="creator-card">' +
+          '<div class="avatar-ring">' + escapeHtml(initials) + '</div>' +
+          '<div class="creator-name">' + escapeHtml(it.name) + '</div>' +
+          (it.city ? '<div class="creator-city">' + escapeHtml(it.city) + '</div>' : '') +
+          (it.about ? '<div class="creator-about">' + escapeHtml(it.about) + '</div>' : '') +
+          '<div class="creator-contact">' + escapeHtml(it.email) + (it.phone ? ' · ' + escapeHtml(it.phone) : '') + '</div>' +
+          (socials.length ? '<div class="social-row">' + socials.join('') + '</div>' : '') +
+          '<div class="card-footer">' +
+            (it.canEdit ? '<button class="edit-btn" onclick=\'openEditModal(' + JSON.stringify(it).replace(/'/g, "&#39;") + ')\'>Edit profile</button>' : '') +
+          '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  /* ------------------------- PROFILE MODAL --------------------------- */
+
+  function openCreateModal() {
+    document.getElementById('modalTitle').textContent = 'Create Profile';
+    document.getElementById('profileId').value = '';
+    ['fName','fPhone','fCity','fAbout','fInstagram','fFacebook','fYoutube'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('modalMsg').textContent = '';
+
+    const emailWrap = document.getElementById('emailFieldWrap');
+    const emailInput = document.getElementById('fEmail');
+    if (currentUser.role === ROLES.CREATOR) {
+      emailInput.value = currentUser.email;
+      emailWrap.style.opacity = '0.6';
+      emailInput.disabled = true;
+    } else {
+      emailInput.value = '';
+      emailWrap.style.opacity = '1';
+      emailInput.disabled = false;
+    }
+
+    document.getElementById('profileModal').classList.add('active');
+  }
+
+  function openEditModal(item) {
+    document.getElementById('modalTitle').textContent = 'Edit Profile';
+    document.getElementById('profileId').value = item.id;
+    document.getElementById('fName').value = item.name || '';
+    document.getElementById('fPhone').value = item.phone || '';
+    document.getElementById('fCity').value = item.city || '';
+    document.getElementById('fAbout').value = item.about || '';
+    document.getElementById('fInstagram').value = item.instagram || '';
+    document.getElementById('fFacebook').value = item.facebook || '';
+    document.getElementById('fYoutube').value = item.youtube || '';
+    document.getElementById('modalMsg').textContent = '';
+
+    const emailWrap = document.getElementById('emailFieldWrap');
+    const emailInput = document.getElementById('fEmail');
+    emailInput.value = item.email || '';
+    if (currentUser.role === ROLES.CREATOR) {
+      emailWrap.style.opacity = '0.6';
+      emailInput.disabled = true;
+    } else {
+      emailWrap.style.opacity = '1';
+      emailInput.disabled = false;
+    }
+
+    document.getElementById('profileModal').classList.add('active');
+  }
+
+  function closeModal() {
+    document.getElementById('profileModal').classList.remove('active');
+  }
+
+  function handleSaveProfile() {
+    const id = document.getElementById('profileId').value;
+    const data = {
+      name: document.getElementById('fName').value.trim(),
+      email: document.getElementById('fEmail').value.trim(),
+      phone: document.getElementById('fPhone').value.trim(),
+      city: document.getElementById('fCity').value.trim(),
+      about: document.getElementById('fAbout').value.trim(),
+      instagram: document.getElementById('fInstagram').value.trim(),
+      facebook: document.getElementById('fFacebook').value.trim(),
+      youtube: document.getElementById('fYoutube').value.trim()
+    };
+
+    if (!data.name) {
+      document.getElementById('modalMsg').textContent = 'Name is required.';
+      return;
+    }
+
+    const btn = document.getElementById('saveProfileBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Saving...';
+
+    const action = id
+      ? callServer('updateDigitalCreatorProfile', currentToken, id, data)
+      : callServer('createDigitalCreatorProfile', currentToken, data);
+
+    action
+      .then(() => {
+        btn.disabled = false;
+        btn.textContent = 'Save Profile';
+        closeModal();
+        loadCities();
+        loadCreators();
+      })
+      .catch(err => {
+        btn.disabled = false;
+        btn.textContent = 'Save Profile';
+        document.getElementById('modalMsg').textContent = (err && err.message) ? err.message : 'Could not save profile.';
+      });
+  }
+
+  /* ------------------------- UTILS ----------------------------------- */
+
+  function escapeHtml(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  function escapeAttr(str) {
+    let s = String(str == null ? '' : str).trim();
+    if (s && !/^https?:\/\//i.test(s)) s = 'https://' + s;
+    return escapeHtml(s);
+  }
+</script>

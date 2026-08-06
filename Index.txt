@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <title>ASTOLIA library</title>
+  <style>
+    :root{
+      --cream:      #F5F2EC;
+      --white:      #FFFFFF;
+      --sand:       #E1D9C8;
+      --sand-line:  #DDD6C8;
+      --sage:       #8FA894;
+      --sage-dark:  #5F7A67;
+      --teal-deep:  #2E4A44;
+      --teal-mid:   #3F5B52;
+      --navy:       #26415E;
+      --gold:       #C9A46A;
+      --text-dark:  #33413D;
+      --text-mute:  #7C8783;
+      --danger:     #B4553F;
+      --radius:     14px;
+      --shadow:     0 4px 18px rgba(46,74,68,0.08);
+    }
+
+    *{box-sizing:border-box;}
+    html,body{
+      margin:0;padding:0;height:100%;
+      background:var(--cream);
+      font-family:'Segoe UI', Tahoma, Georgia, sans-serif;
+      color:var(--text-dark);
+    }
+    button{font-family:inherit;cursor:pointer;}
+    input,select,textarea{font-family:inherit;}
+
+    /* ---------- LOGIN SCREEN ---------- */
+    #loginScreen{
+      min-height:100vh;
+      display:flex;align-items:center;justify-content:center;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(143,168,148,0.18), transparent 45%),
+        radial-gradient(circle at 80% 80%, rgba(201,164,106,0.15), transparent 45%),
+        var(--cream);
+      padding:20px;
+    }
+    .login-card{
+      width:100%;max-width:400px;
+      background:var(--white);
+      border:1px solid var(--sand-line);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      padding:40px 36px;
+      text-align:center;
+    }
+    .brand{
+      font-size:28px;
+      letter-spacing:2px;
+      color:var(--teal-deep);
+      font-weight:700;
+      margin-bottom:2px;
+    }
+    .brand span{font-weight:300;color:var(--sage-dark);}
+    .brand-sub{
+      font-size:12px;letter-spacing:3px;text-transform:uppercase;
+      color:var(--gold);margin-bottom:30px;
+    }
+    .field-label{
+      text-align:left;font-size:13px;color:var(--text-mute);
+      margin:16px 0 6px;font-weight:600;
+    }
+    .input{
+      width:100%;padding:12px 14px;
+      border:1px solid var(--sand-line);
+      border-radius:10px;font-size:15px;
+      background:var(--cream);color:var(--text-dark);
+      outline:none;transition:.15s;
+    }
+    .input:focus{border-color:var(--sage-dark);background:var(--white);}
+    .btn{
+      width:100%;padding:12px 14px;border:none;border-radius:10px;
+      font-size:15px;font-weight:600;margin-top:20px;
+      background:var(--teal-deep);color:var(--white);
+      transition:.15s;
+    }
+    .btn:hover{background:var(--teal-mid);}
+    .btn:disabled{opacity:.55;cursor:default;}
+    .btn-secondary{
+      background:transparent;color:var(--sage-dark);
+      border:1px solid var(--sand-line);margin-top:10px;
+    }
+    .btn-secondary:hover{background:var(--sand);}
+    .msg{font-size:13px;margin-top:14px;min-height:16px;}
+    .msg.error{color:var(--danger);}
+    .msg.success{color:var(--sage-dark);}
+    .hidden{display:none !important;}
+    .spinner{
+      display:inline-block;width:14px;height:14px;
+      border:2px solid rgba(255,255,255,.5);border-top-color:#fff;
+      border-radius:50%;animation:spin .7s linear infinite;
+      vertical-align:middle;margin-right:6px;
+    }
+    @keyframes spin{to{transform:rotate(360deg);}}
+
+    /* ---------- APP SHELL ---------- */
+    #appShell{display:none;min-height:100vh;}
+    #appShell.active{display:flex;}
+
+    .sidebar{
+      width:240px;flex-shrink:0;
+      background:var(--teal-deep);
+      color:var(--cream);
+      display:flex;flex-direction:column;
+      padding:26px 0;
+    }
+    .sidebar-brand{
+      padding:0 24px 26px;border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:18px;
+    }
+    .sidebar-brand .brand{color:var(--white);font-size:20px;text-align:left;margin:0;}
+    .sidebar-brand .brand-sub{color:var(--gold);text-align:left;margin:2px 0 0;}
+
+    .nav-item{
+      display:flex;align-items:center;gap:10px;
+      padding:13px 24px;font-size:14px;font-weight:500;
+      color:rgba(245,242,236,0.75);cursor:pointer;
+      border-left:3px solid transparent;
+      transition:.15s;
+    }
+    .nav-item:hover{background:rgba(255,255,255,0.06);color:var(--white);}
+    .nav-item.active{
+      background:rgba(255,255,255,0.09);
+      border-left-color:var(--gold);
+      color:var(--white);
+    }
+    .nav-dot{width:6px;height:6px;border-radius:50%;background:var(--sage);flex-shrink:0;}
+
+    .sidebar-footer{
+      margin-top:auto;padding:16px 24px 0;border-top:1px solid rgba(255,255,255,0.1);
+    }
+    .user-chip{font-size:13px;color:var(--white);font-weight:600;}
+    .user-role{font-size:11px;color:var(--sage);text-transform:uppercase;letter-spacing:1px;margin-top:2px;}
+    .logout-link{
+      display:inline-block;margin-top:12px;font-size:12px;color:rgba(245,242,236,0.6);
+      text-decoration:underline;cursor:pointer;
+    }
+    .logout-link:hover{color:var(--white);}
+
+    /* ---------- MAIN CONTENT ---------- */
+    .main{flex:1;padding:32px 40px;overflow-y:auto;}
+    .page-header{
+      display:flex;align-items:center;justify-content:space-between;
+      margin-bottom:24px;flex-wrap:wrap;gap:14px;
+    }
+    .page-title{font-size:24px;font-weight:700;color:var(--teal-deep);}
+    .page-title small{display:block;font-size:12px;font-weight:500;color:var(--text-mute);margin-top:4px;letter-spacing:.5px;}
+
+    .btn-accent{
+      background:var(--gold);color:var(--white);border:none;
+      padding:11px 20px;border-radius:10px;font-weight:600;font-size:14px;
+      display:inline-flex;align-items:center;gap:6px;
+    }
+    .btn-accent:hover{background:#B8935A;}
+
+    /* filter bar */
+    .filter-bar{
+      display:flex;gap:12px;flex-wrap:wrap;
+      background:var(--white);border:1px solid var(--sand-line);
+      border-radius:var(--radius);padding:16px 18px;margin-bottom:26px;
+      box-shadow:var(--shadow);
+    }
+    .filter-bar .input, .filter-bar select{
+      flex:1;min-width:160px;
+    }
+    .filter-bar select{
+      padding:12px 14px;border:1px solid var(--sand-line);border-radius:10px;
+      background:var(--cream);color:var(--text-dark);
+    }
+
+    /* card grid */
+    .grid{
+      display:grid;grid-template-columns:repeat(auto-fill, minmax(270px,1fr));
+      gap:20px;
+    }
+    .creator-card{
+      background:var(--white);border:1px solid var(--sand-line);
+      border-radius:var(--radius);padding:22px;box-shadow:var(--shadow);
+      display:flex;flex-direction:column;gap:10px;
+      transition:.15s;
+    }
+    .creator-card:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(46,74,68,0.12);}
+    .avatar-ring{
+      width:52px;height:52px;border-radius:50%;
+      background:linear-gradient(135deg, var(--sage), var(--teal-mid));
+      color:var(--white);display:flex;align-items:center;justify-content:center;
+      font-weight:700;font-size:18px;
+    }
+    .creator-name{font-size:16px;font-weight:700;color:var(--teal-deep);}
+    .creator-city{font-size:12px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:.5px;}
+    .creator-about{font-size:13px;color:var(--text-mute);line-height:1.5;
+      display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+    .creator-contact{font-size:12.5px;color:var(--text-dark);}
+    .social-row{display:flex;gap:10px;margin-top:4px;}
+    .social-link{
+      font-size:12px;color:var(--navy);text-decoration:none;
+      background:var(--cream);border:1px solid var(--sand-line);
+      padding:5px 10px;border-radius:20px;
+    }
+    .social-link:hover{background:var(--sand);}
+    .card-footer{margin-top:auto;padding-top:10px;border-top:1px solid var(--sand-line);
+      display:flex;justify-content:flex-end;}
+    .edit-btn{
+      font-size:12.5px;font-weight:600;color:var(--sage-dark);
+      background:none;border:none;text-decoration:underline;
+    }
+    .empty-state{
+      text-align:center;padding:60px 20px;color:var(--text-mute);
+      background:var(--white);border:1px dashed var(--sand-line);border-radius:var(--radius);
+    }
+
+    /* coming soon */
+    .coming-soon{
+      background:var(--white);border:1px solid var(--sand-line);border-radius:var(--radius);
+      padding:80px 30px;text-align:center;box-shadow:var(--shadow);
+    }
+    .coming-soon h3{color:var(--teal-deep);font-size:20px;margin-bottom:8px;}
+    .coming-soon p{color:var(--text-mute);font-size:14px;}
+    .badge-soon{
+      display:inline-block;margin-top:14px;font-size:11px;font-weight:700;
+      letter-spacing:1.5px;text-transform:uppercase;color:var(--white);
+      background:var(--sage-dark);padding:6px 14px;border-radius:20px;
+    }
+
+    /* modal */
+    .modal-overlay{
+      display:none;position:fixed;inset:0;background:rgba(46,74,68,0.45);
+      align-items:center;justify-content:center;padding:20px;z-index:100;
+    }
+    .modal-overlay.active{display:flex;}
+    .modal{
+      background:var(--white);border-radius:var(--radius);
+      width:100%;max-width:520px;max-height:90vh;overflow-y:auto;
+      padding:28px 30px;box-shadow:0 20px 60px rgba(0,0,0,0.25);
+    }
+    .modal h3{color:var(--teal-deep);margin-top:0;}
+    .modal-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    .modal-grid .full{grid-column:1 / -1;}
+    .modal-actions{display:flex;gap:10px;margin-top:22px;}
+    .modal-actions .btn{margin-top:0;}
+    textarea.input{resize:vertical;min-height:70px;}
+
+    @media (max-width:760px){
+      #appShell.active{flex-direction:column;}
+      .sidebar{width:100%;flex-direction:row;overflow-x:auto;padding:14px 0;}
+      .sidebar-brand,.sidebar-footer{display:none;}
+      .nav-item{border-left:none;border-bottom:3px solid transparent;white-space:nowrap;}
+      .nav-item.active{border-bottom-color:var(--gold);}
+      .main{padding:22px 18px;}
+      .modal-grid{grid-template-columns:1fr;}
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ===================== LOGIN SCREEN ===================== -->
+  <div id="loginScreen">
+    <div class="login-card">
+      <div class="brand">ASTOLIA <span>library</span></div>
+      <div class="brand-sub">Content &amp; Video Hub</div>
+
+      <div id="loginStep">
+        <div class="field-label">Username</div>
+        <input type="text" id="usernameInput" class="input" placeholder="Your display name" autocomplete="username">
+        <div class="field-label">Password</div>
+        <input type="password" id="passwordInput" class="input" placeholder="Your password" autocomplete="current-password">
+        <button class="btn" id="loginBtn" onclick="handleLogin()">Sign In</button>
+      </div>
+
+      <div class="msg" id="loginMsg"></div>
+    </div>
+  </div>
+
+  <!-- ===================== APP SHELL ===================== -->
+  <div id="appShell">
+    <div class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand">ASTOLIA <span>library</span></div>
+        <div class="brand-sub">Content &amp; Video Hub</div>
+      </div>
+
+      <div class="nav-item" data-tab="library" onclick="switchTab('library')">
+        <span class="nav-dot"></span> The Library
+      </div>
+      <div class="nav-item" data-tab="digitalCreator" onclick="switchTab('digitalCreator')">
+        <span class="nav-dot"></span> Digital Creator
+      </div>
+      <div class="nav-item" data-tab="partnerships" onclick="switchTab('partnerships')">
+        <span class="nav-dot"></span> Creator Partnerships
+      </div>
+      <div class="nav-item" data-tab="experiences" onclick="switchTab('experiences')">
+        <span class="nav-dot"></span> My Experiences
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="user-chip" id="userChipName">—</div>
+        <div class="user-role" id="userChipRole">—</div>
+        <div class="logout-link" onclick="handleLogout()">Sign out</div>
+      </div>
+    </div>
+
+    <div class="main">
+
+      <!-- THE LIBRARY -->
+      <div class="tab-page" id="page-library">
+        <div class="page-header">
+          <div class="page-title">The Library<small>Video assets &amp; resources</small></div>
+        </div>
+        <div class="coming-soon">
+          <h3>The Library</h3>
+          <p>This section is being crafted for video editors and admins.</p>
+          <span class="badge-soon">Coming soon</span>
+        </div>
+      </div>
+
+      <!-- DIGITAL CREATOR -->
+      <div class="tab-page" id="page-digitalCreator">
+        <div class="page-header">
+          <div class="page-title">Digital Creator<small>Content creator profiles</small></div>
+          <button class="btn-accent hidden" id="createProfileBtn" onclick="openCreateModal()">+ Create Profile</button>
+        </div>
+
+        <div class="filter-bar" id="filterBar">
+          <select id="cityFilter" onchange="loadCreators()">
+            <option value="">All cities</option>
+          </select>
+          <input type="text" class="input" id="searchFilter" placeholder="Search by name..." oninput="debouncedLoadCreators()">
+        </div>
+
+        <div class="grid" id="creatorsGrid"></div>
+      </div>
+
+      <!-- CREATOR PARTNERSHIPS -->
+      <div class="tab-page" id="page-partnerships">
+        <div class="page-header">
+          <div class="page-title">Creator Partnerships<small>Collaboration management</small></div>
+        </div>
+        <div class="coming-soon">
+          <h3>Creator Partnerships</h3>
+          <p>This section is being crafted for video editors and admins.</p>
+          <span class="badge-soon">Coming soon</span>
+        </div>
+      </div>
+
+      <!-- MY EXPERIENCES -->
+      <div class="tab-page" id="page-experiences">
+        <div class="page-header">
+          <div class="page-title">My Experiences<small>Projects &amp; collaborations</small></div>
+        </div>
+        <div class="coming-soon">
+          <h3>My Experiences</h3>
+          <p>This section is coming soon.</p>
+          <span class="badge-soon">Coming soon</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===================== PROFILE MODAL ===================== -->
+  <div class="modal-overlay" id="profileModal">
+    <div class="modal">
+      <h3 id="modalTitle">Create Profile</h3>
+      <input type="hidden" id="profileId">
+      <div class="modal-grid">
+        <div class="full">
+          <div class="field-label">Full name *</div>
+          <input type="text" class="input" id="fName" placeholder="Jane Doe">
+        </div>
+        <div class="full" id="emailFieldWrap">
+          <div class="field-label">Email *</div>
+          <input type="email" class="input" id="fEmail" placeholder="jane@email.com">
+        </div>
+        <div>
+          <div class="field-label">Phone</div>
+          <input type="text" class="input" id="fPhone" placeholder="+1 555 000 0000">
+        </div>
+        <div>
+          <div class="field-label">City</div>
+          <input type="text" class="input" id="fCity" placeholder="New York">
+        </div>
+        <div class="full">
+          <div class="field-label">About me</div>
+          <textarea class="input" id="fAbout" placeholder="A short bio..."></textarea>
+        </div>
+        <div class="full">
+          <div class="field-label">Instagram link</div>
+          <input type="text" class="input" id="fInstagram" placeholder="https://instagram.com/...">
+        </div>
+        <div class="full">
+          <div class="field-label">Facebook link</div>
+          <input type="text" class="input" id="fFacebook" placeholder="https://facebook.com/...">
+        </div>
+        <div class="full">
+          <div class="field-label">YouTube link</div>
+          <input type="text" class="input" id="fYoutube" placeholder="https://youtube.com/...">
+        </div>
+      </div>
+      <div class="msg error" id="modalMsg"></div>
+      <div class="modal-actions">
+        <button class="btn" id="saveProfileBtn" onclick="handleSaveProfile()">Save Profile</button>
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <?!= include('JavaScript'); ?>
+</body>
+</html>
