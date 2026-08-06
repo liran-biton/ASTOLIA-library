@@ -686,6 +686,7 @@
       opts = opts || {};
       const creators = Array.isArray(opts.creators) ? opts.creators : [];
       const branches = Array.isArray(opts.branches) ? opts.branches : [];
+      const sceneTypes = Array.isArray(opts.sceneTypes) ? opts.sceneTypes : [];
 
       const creatorSel = document.getElementById('libCreatorFilter');
       const currentCreator = creatorSel.value;
@@ -698,6 +699,12 @@
       branchSel.innerHTML = '<option value="">All spa branches</option>' +
         branches.map(b => '<option value="' + escapeHtml(b.id) + '">' + escapeHtml(b.name) + '</option>').join('');
       branchSel.value = currentBranch;
+
+      const sceneSel = document.getElementById('libSceneFilter');
+      const currentScene = sceneSel.value;
+      sceneSel.innerHTML = '<option value="">All scene types</option>' +
+        sceneTypes.map(s => '<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + '</option>').join('');
+      sceneSel.value = currentScene;
     }).catch(() => {});
   }
 
@@ -705,6 +712,7 @@
     document.getElementById('libCreatorFilter').value = '';
     document.getElementById('libTypeFilter').value = '';
     document.getElementById('libBranchFilter').value = '';
+    document.getElementById('libSceneFilter').value = '';
     document.getElementById('libDateFilter').value = '';
     loadLibrary();
   }
@@ -717,6 +725,7 @@
       creatorEmail: document.getElementById('libCreatorFilter').value,
       contentType: document.getElementById('libTypeFilter').value,
       branchId: document.getElementById('libBranchFilter').value,
+      sceneType: document.getElementById('libSceneFilter').value,
       date: document.getElementById('libDateFilter').value
     };
 
@@ -739,6 +748,24 @@
                 '<a class="media-video-thumb" href="' + escapeAttr(it.fileUrl) + '" target="_blank">▶</a>' +
               '</div>';
 
+          const moodTags = (it.aiMoodTags || '').split(',').map(t => t.trim()).filter(Boolean);
+          const keywordTags = (it.aiKeywords || '').split(',').map(t => t.trim()).filter(Boolean);
+
+          let aiBlock = '';
+          if (it.aiStatus === 'Completed') {
+            aiBlock =
+              (it.aiSceneType ? '<div class="info-row"><span>Scene</span><span>' + escapeHtml(it.aiSceneType) + '</span></div>' : '') +
+              (it.aiQualityScore ? '<div class="info-row"><span>Quality</span><span>' + escapeHtml(String(it.aiQualityScore)) + '/5</span></div>' : '') +
+              (it.aiDescription ? '<div class="creator-about">' + escapeHtml(it.aiDescription) + '</div>' : '') +
+              (it.aiSuggestedCaption ? '<div class="creator-about" style="font-style:italic;">"' + escapeHtml(it.aiSuggestedCaption) + '"</div>' : '') +
+              (moodTags.length ? '<div class="tag-row">' + moodTags.map(t => '<span class="tag">' + escapeHtml(t) + '</span>').join('') + '</div>' : '') +
+              (keywordTags.length ? '<div class="tag-row">' + keywordTags.map(t => '<span class="tag">#' + escapeHtml(t) + '</span>').join('') + '</div>' : '');
+          } else if (it.aiStatus === 'Failed') {
+            aiBlock = '<div class="info-row"><span>AI analysis</span><span style="color:var(--danger);">Failed</span></div>';
+          } else if (it.aiStatus === 'Pending') {
+            aiBlock = '<div class="info-row"><span>AI analysis</span><span>Pending</span></div>';
+          }
+
           return '' +
             '<div class="creator-card media-card">' +
               media +
@@ -747,6 +774,7 @@
                 '<div class="creator-city">' + escapeHtml(it.branchName) + '</div>' +
                 '<div class="info-row"><span>Visit date</span><span>' + formatDateUS(it.visitDate) + '</span></div>' +
                 '<div class="info-row"><span>Uploaded</span><span>' + formatDateUS(it.uploadedAt) + '</span></div>' +
+                aiBlock +
                 '<div class="card-footer"><a class="edit-btn" href="' + escapeAttr(it.fileUrl) + '" target="_blank">Open in Drive</a></div>' +
               '</div>' +
             '</div>';
@@ -880,6 +908,68 @@
     });
   }
 
+  // Captures 3 frames (25%/50%/75% through the clip) from a video File,
+  // entirely in the browser, so the AI can analyze a video's content
+  // without Apps Script ever needing to decode video itself.
+  function extractVideoFrames(file) {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.preload = 'auto';
+      video.muted = true;
+      video.playsInline = true;
+      video.style.position = 'fixed';
+      video.style.left = '-9999px';
+      document.body.appendChild(video);
+
+      const objectUrl = URL.createObjectURL(file);
+      video.src = objectUrl;
+
+      const fractions = [0.25, 0.5, 0.75];
+      const frames = [];
+      let idx = 0;
+
+      function cleanup() {
+        URL.revokeObjectURL(objectUrl);
+        video.remove();
+      }
+
+      function captureAt(fraction) {
+        video.currentTime = Math.max(0, Math.min(video.duration * fraction, video.duration - 0.05));
+      }
+
+      video.addEventListener('loadedmetadata', () => {
+        if (!isFinite(video.duration) || video.duration <= 0) {
+          reject(new Error('Could not read video duration for ' + file.name));
+          cleanup();
+          return;
+        }
+        captureAt(fractions[0]);
+      });
+
+      video.addEventListener('seeked', () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 360;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        frames.push(canvas.toDataURL('image/jpeg', 0.8).split(',')[1] || '');
+
+        idx++;
+        if (idx < fractions.length) {
+          captureAt(fractions[idx]);
+        } else {
+          cleanup();
+          resolve(frames);
+        }
+      });
+
+      video.addEventListener('error', () => {
+        cleanup();
+        reject(new Error('Could not read video: ' + file.name));
+      });
+    });
+  }
+
   function handleUploadContent() {
     const imageFiles = Array.from(document.getElementById('uploadImagesInput').files || []);
     const videoFiles = Array.from(document.getElementById('uploadVideosInput').files || []);
@@ -908,21 +998,32 @@
 
     const btn = document.getElementById('uploadSaveBtn');
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span>Uploading...';
-    document.getElementById('uploadProgressList').innerHTML = '<div>Preparing files…</div>';
+    btn.innerHTML = '<span class="spinner"></span>Preparing files...';
+    document.getElementById('uploadProgressList').innerHTML = '<div>Reading files…</div>';
 
     const allFiles = imageFiles.map(f => ({ file: f, contentType: 'Image' }))
       .concat(videoFiles.map(f => ({ file: f, contentType: 'Video' })));
 
-    Promise.all(allFiles.map(entry =>
-      fileToBase64(entry.file).then(base64 => ({
+    Promise.all(allFiles.map(entry => {
+      const base64Promise = fileToBase64(entry.file);
+      if (entry.contentType === 'Video') {
+        return Promise.all([base64Promise, extractVideoFrames(entry.file)]).then(([base64, frames]) => ({
+          name: entry.file.name,
+          mimeType: entry.file.type || 'application/octet-stream',
+          contentType: entry.contentType,
+          base64: base64,
+          frames: frames
+        }));
+      }
+      return base64Promise.then(base64 => ({
         name: entry.file.name,
         mimeType: entry.file.type || 'application/octet-stream',
         contentType: entry.contentType,
         base64: base64
-      }))
-    )).then(payload => {
-      document.getElementById('uploadProgressList').innerHTML = '<div>Uploading ' + payload.length + ' file(s) to the library…</div>';
+      }));
+    })).then(payload => {
+      btn.innerHTML = '<span class="spinner"></span>Uploading & analyzing...';
+      document.getElementById('uploadProgressList').innerHTML = '<div>Uploading ' + payload.length + ' file(s) and running AI analysis — this can take a little while…</div>';
       return callServer('uploadPartnershipContent', currentToken, uploadTargetPartnershipId, payload);
     }).then(() => {
       btn.disabled = false;
