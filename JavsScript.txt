@@ -681,12 +681,15 @@
 
   /* ------------------------- THE LIBRARY ------------------------------ */
 
+  let libraryDebounceTimer = null;
+
   function loadLibraryFilterOptions() {
     callServer('getLibraryFilterOptions', currentToken).then(opts => {
       opts = opts || {};
       const creators = Array.isArray(opts.creators) ? opts.creators : [];
       const branches = Array.isArray(opts.branches) ? opts.branches : [];
       const sceneTypes = Array.isArray(opts.sceneTypes) ? opts.sceneTypes : [];
+      const moodTags = Array.isArray(opts.moodTags) ? opts.moodTags : [];
 
       const creatorSel = document.getElementById('libCreatorFilter');
       const currentCreator = creatorSel.value;
@@ -705,7 +708,46 @@
       sceneSel.innerHTML = '<option value="">All scene types</option>' +
         sceneTypes.map(s => '<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + '</option>').join('');
       sceneSel.value = currentScene;
+
+      const moodPanel = document.getElementById('moodFilterPanel');
+      if (!moodPanel.dataset.built) {
+        moodPanel.innerHTML = moodTags.map(m =>
+          '<label><input type="checkbox" value="' + escapeHtml(m) + '" onchange="onLibraryMultiFilterChange()"> ' + escapeHtml(m) + '</label>'
+        ).join('');
+        moodPanel.dataset.built = '1';
+      }
     }).catch(() => {});
+  }
+
+  function toggleMultiselect(panelId) {
+    document.querySelectorAll('.multiselect-panel').forEach(p => { if (p.id !== panelId) p.classList.remove('open'); });
+    document.getElementById(panelId).classList.toggle('open');
+  }
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.multiselect')) {
+      document.querySelectorAll('.multiselect-panel').forEach(p => p.classList.remove('open'));
+    }
+  });
+
+  function getMultiselectValues(panelId) {
+    return Array.from(document.querySelectorAll('#' + panelId + ' input[type="checkbox"]:checked')).map(el => el.value);
+  }
+
+  function updateMultiselectLabel(btnId, panelId, allLabel) {
+    const count = getMultiselectValues(panelId).length;
+    document.getElementById(btnId).textContent = count > 0 ? (count + ' selected') : allLabel;
+  }
+
+  function onLibraryMultiFilterChange() {
+    updateMultiselectLabel('qualityFilterBtn', 'qualityFilterPanel', 'All quality levels');
+    updateMultiselectLabel('moodFilterBtn', 'moodFilterPanel', 'All moods');
+    loadLibrary();
+  }
+
+  function debouncedLoadLibrary() {
+    clearTimeout(libraryDebounceTimer);
+    libraryDebounceTimer = setTimeout(loadLibrary, 300);
   }
 
   function clearLibraryFilters() {
@@ -713,8 +755,38 @@
     document.getElementById('libTypeFilter').value = '';
     document.getElementById('libBranchFilter').value = '';
     document.getElementById('libSceneFilter').value = '';
+    document.getElementById('libKeywordsFilter').value = '';
     document.getElementById('libDateFilter').value = '';
-    loadLibrary();
+    document.querySelectorAll('#qualityFilterPanel input, #moodFilterPanel input').forEach(el => el.checked = false);
+    onLibraryMultiFilterChange();
+  }
+
+  function renderStars(score) {
+    score = Math.max(0, Math.min(5, Number(score) || 0));
+    let html = '<span class="ai-stars">';
+    for (let i = 1; i <= 5; i++) {
+      html += i <= score ? '★' : '<span class="star-empty">★</span>';
+    }
+    html += '</span>';
+    return html;
+  }
+
+  function renderAiTextBlock(label, text, isQuote) {
+    if (!text) return '';
+    const content = isQuote ? '"' + escapeHtml(text) + '"' : escapeHtml(text);
+    const needsToggle = text.length > 90;
+    return '' +
+      '<div class="ai-text-block">' +
+        '<div class="ai-text-label">' + escapeHtml(label) + '</div>' +
+        '<div class="ai-text-content">' + content + '</div>' +
+        (needsToggle ? '<button type="button" class="ai-read-more" onclick="toggleAiText(this)">Read more</button>' : '') +
+      '</div>';
+  }
+
+  function toggleAiText(btn) {
+    const content = btn.previousElementSibling;
+    const isExpanded = content.classList.toggle('expanded');
+    btn.textContent = isExpanded ? 'Show less' : 'Read more';
   }
 
   function loadLibrary() {
@@ -726,7 +798,10 @@
       contentType: document.getElementById('libTypeFilter').value,
       branchId: document.getElementById('libBranchFilter').value,
       sceneType: document.getElementById('libSceneFilter').value,
-      date: document.getElementById('libDateFilter').value
+      keywords: document.getElementById('libKeywordsFilter').value,
+      date: document.getElementById('libDateFilter').value,
+      qualityScores: getMultiselectValues('qualityFilterPanel'),
+      moodTags: getMultiselectValues('moodFilterPanel')
     };
 
     callServer('getLibraryContent', currentToken, filters)
@@ -749,17 +824,15 @@
               '</div>';
 
           const moodTags = (it.aiMoodTags || '').split(',').map(t => t.trim()).filter(Boolean);
-          const keywordTags = (it.aiKeywords || '').split(',').map(t => t.trim()).filter(Boolean);
 
           let aiBlock = '';
           if (it.aiStatus === 'Completed') {
             aiBlock =
               (it.aiSceneType ? '<div class="info-row"><span>Scene</span><span>' + escapeHtml(it.aiSceneType) + '</span></div>' : '') +
-              (it.aiQualityScore ? '<div class="info-row"><span>Quality</span><span>' + escapeHtml(String(it.aiQualityScore)) + '/5</span></div>' : '') +
-              (it.aiDescription ? '<div class="creator-about">' + escapeHtml(it.aiDescription) + '</div>' : '') +
-              (it.aiSuggestedCaption ? '<div class="creator-about" style="font-style:italic;">"' + escapeHtml(it.aiSuggestedCaption) + '"</div>' : '') +
-              (moodTags.length ? '<div class="tag-row">' + moodTags.map(t => '<span class="tag">' + escapeHtml(t) + '</span>').join('') + '</div>' : '') +
-              (keywordTags.length ? '<div class="tag-row">' + keywordTags.map(t => '<span class="tag">#' + escapeHtml(t) + '</span>').join('') + '</div>' : '');
+              (it.aiQualityScore ? '<div class="info-row"><span>Quality</span>' + renderStars(it.aiQualityScore) + '</div>' : '') +
+              (moodTags.length ? '<div class="tag-row">' + moodTags.map(t => '<span class="tag-mood">' + escapeHtml(t) + '</span>').join('') + '</div>' : '') +
+              renderAiTextBlock('Description', it.aiDescription, false) +
+              renderAiTextBlock('Suggested caption', it.aiSuggestedCaption, true);
           } else if (it.aiStatus === 'Failed') {
             aiBlock = '<div class="info-row"><span>AI analysis</span><span style="color:var(--danger);">Failed</span></div>';
           } else if (it.aiStatus === 'Pending') {
