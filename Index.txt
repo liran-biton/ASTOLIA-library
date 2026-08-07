@@ -426,6 +426,9 @@
         <span class="nav-dot"></span> My Experiences
         <span class="nav-badge hidden" id="expBadge">0</span>
       </div>
+      <div class="nav-item" data-tab="admin" onclick="switchTab('admin')">
+        <span class="nav-dot"></span> Admin
+      </div>
 
       <div class="sidebar-footer">
         <div class="user-chip" id="userChipName">—</div>
@@ -567,6 +570,55 @@
         <div class="grid" id="experiencesGrid"></div>
       </div>
 
+      <!-- ADMIN — USER MANAGEMENT -->
+      <div class="tab-page" id="page-admin">
+        <div class="page-header">
+          <div class="page-title">Admin<small>Manage system users</small></div>
+          <button class="btn-accent" onclick="openUserModal()">+ Add User</button>
+        </div>
+
+        <div class="grid" id="usersGrid"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===================== USER MODAL ===================== -->
+  <div class="modal-overlay" id="userModal">
+    <div class="modal">
+      <h3 id="userModalTitle">Add User</h3>
+      <input type="hidden" id="uOriginalEmail">
+
+      <div class="field-label">Display name (username) *</div>
+      <input type="text" class="input" id="uDisplayName" placeholder="Jane Doe">
+
+      <div class="field-label">Email *</div>
+      <input type="email" class="input" id="uEmail" placeholder="jane@astolia.com">
+
+      <div class="field-label">Role *</div>
+      <select class="input" id="uRole">
+        <option value="Content Creator">Content Creator</option>
+        <option value="Video Editor">Video Editor</option>
+        <option value="Admin">Admin</option>
+      </select>
+
+      <div class="field-label">Status</div>
+      <select class="input" id="uStatus">
+        <option value="Active">Active</option>
+        <option value="Inactive">Inactive</option>
+      </select>
+
+      <div class="field-label">Password (6 digits) <span id="uPasswordHint" style="font-weight:400;color:var(--text-mute);"></span></div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" class="input" id="uPassword" maxlength="6" inputmode="numeric" placeholder="123456">
+        <button type="button" class="btn-secondary-sm" onclick="generateUserPassword()">Generate</button>
+      </div>
+
+      <div class="msg error" id="userMsg"></div>
+      <div class="modal-actions">
+        <button class="btn" id="userSaveBtn" onclick="handleSaveUser()">Save User</button>
+        <button class="btn btn-secondary" onclick="closeUserModal()">Cancel</button>
+      </div>
     </div>
   </div>
 
