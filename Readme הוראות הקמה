@@ -1,0 +1,122 @@
+# ASTOLIA library — הוראות הקמה
+
+## 1. יצירת Google Sheet
+צרו קובץ Google Sheets חדש עם 7 טאבים בדיוק בשמות הבאים:
+
+### טאב `Users`
+כותרות בשורה 1 (בדיוק כך):
+```
+Email	Display Name	Role	Status	Password
+```
+- **Display Name** — זה שם המשתמש (Username) שאיתו מתחברים למערכת
+- **Password** — הסיסמה של המשתמש (טקסט חופשי)
+- **Role** — אחד מהערכים: `Content Creator` / `Video Editor` / `Admin`
+- **Status** — `Active` כדי שהמשתמש יוכל להתחבר (כל ערך אחר יחסום כניסה)
+- **Email** — עדיין נשמר בשימוש פנימי (לשיוך פרופיל ב-Digital Creator ליוצר התוכן עצמו)
+
+דוגמה לשורה:
+```
+dana@astolia.com	Dana Cohen	Content Creator	Active	MyPass123
+```
+
+⚠️ הסיסמאות נשמרות כטקסט רגיל בגיליון — ודאו שהגישה לגיליון עצמו מוגבלת רק לאדמינים.
+
+### טאב `Digital Creator`
+כותרות בשורה 1 (בדיוק כך, המערכת כותבת אליהן אוטומטית — לא צריך למלא ידנית):
+```
+ProfileID	Name	Email	Phone	City	About	Instagram	Facebook	YouTube	CreatedBy	CreatedAt	Status
+```
+- **Status** — `Active` / `Inactive` — מוצג כתגית על הכרטיס, ניתן לשינוי מטופס העריכה
+השאירו את הטאב ריק מתחת לכותרות — המערכת תמלא אותו.
+
+### טאב `Spa Branches`
+כותרות בשורה 1 (בדיוק כך, המערכת כותבת אליהן אוטומטית):
+```
+BranchID	Branch Name	Address	Operating Hours	Contact Person	Swedish Massage	Reflexology	Pool Area	Jacuzzi	Sauna	Status
+```
+- 5 העמודות של סוגי הפעילות (Swedish Massage / Reflexology / Pool Area / Jacuzzi / Sauna) נשמרות כ-TRUE/FALSE
+- **Status** — `Active` / `Inactive` — רק סניפים Active מוצגים ברשימה כשיוצרים שת"פ חדש
+- הרשאה: Admin + Video Editor בלבד (מנוהל בתוך טאב Creator Partnerships → Spa Branches)
+
+### טאב `Benefits`
+כותרות בשורה 1 (בדיוק כך, המערכת כותבת אליהן אוטומטית):
+```
+BenefitID	Treatment	Duration	Status	Activity Type
+```
+- **Status** — `Active` / `Inactive` — רק הטבות Active מוצגות ברשימה כשיוצרים שת"פ חדש
+- **Activity Type** — אחד מ: `Swedish Massage` / `Reflexology` / `Pool Area` / `Jacuzzi` / `Sauna` — קובע לאיזו פעילות ההטבה שייכת. כשיוצרים/עורכים שת"פ ובוחרים סניף, המערכת מציגה **רק** הטבות שהסניף הזה בפועל מציע (לפי סימוני הפעילות שלו ב-Spa Branches)
+- הרשאה: Admin + Video Editor בלבד (מנוהל בתוך טאב Creator Partnerships → Benefits Package)
+
+### טאב `Partnerships`
+כותרות בשורה 1 (בדיוק כך, המערכת כותבת אליהן אוטומטית — לא צריך למלא ידנית):
+```
+PartnershipID	CreatorEmail	CreatorName	BranchID	BranchName	VisitDate	VisitTime	PeopleCount	Benefits	Posts	Reels	Stories	UploadDeadline	Status	CreatedBy	CreatedAt	HealthConfirmed	PregnancyDeclaration	ApprovedAt	CancelledBy	CancelledAt	RequiredPhotos	RequiredVideos	PostsDone	ReelsDone	StoriesDone	FeelingRating	OverallRating	SatisfactionRating	ExperienceNotes
+```
+- **Status** — `Pending Approval` (נוצר ע"י עורך/אדמין) → `Approved` (אישר יוצר התוכן) או `Cancelled` (בוטל ע"י עורך/אדמין)
+- **HealthConfirmed** / **PregnancyDeclaration** — נכתבים ע"י יוצר התוכן בזמן האישור
+- **RequiredPhotos** / **RequiredVideos** — כמה תמונות/סרטונים יוצר התוכן צריך להעלות לפלטפורמה (נקבע ע"י עורך/אדמין ביצירת השת"פ, ניתן לעדכן בעריכה)
+- **PostsDone** / **ReelsDone** / **StoriesDone** — TRUE/FALSE, מסומן ע"י יוצר התוכן ב-My Experiences אחרי שפרסם בפועל
+- **FeelingRating** / **OverallRating** / **SatisfactionRating** — ציוני 1-5 שיוצר התוכן ממלא כחוויה על השת"פ
+- **ExperienceNotes** — טקסט חופשי מיוצר התוכן על החוויה
+- השאירו את הטאב ריק מתחת לכותרות — המערכת תמלא אותו.
+
+### טאב `Library Content`
+כותרות בשורה 1 (בדיוק כך, המערכת כותבת אליהן אוטומטית — לא צריך למלא ידנית):
+```
+ContentID	PartnershipID	CreatorEmail	CreatorName	BranchID	BranchName	VisitDate	ContentType	FileName	DriveFileId	FileUrl	UploadedAt	UploadedBy
+```
+- **ContentType** — `Image` או `Video`
+- כל קובץ שמעלה יוצר תוכן נשמר בפועל בגוגל דרייב (בתיקייה הייעודית, ראו סעיף הבא), והשורה כאן היא רק אינדקס לצורך סינון וחיפוש ב-The Library
+- השאירו את הטאב ריק מתחת לכותרות — המערכת תמלא אותו.
+
+### טאב `Activity_Log`
+כותרות בשורה 1 (בדיוק כך, המערכת כותבת אליהן אוטומטית):
+```
+Timestamp	User	Tab
+```
+- נרשמת שורה בכל פעם שמשתמש עובר לטאב ראשי בתפריט הצד (Digital Creator / Creator Partnerships / My Experiences / The Library / Admin)
+- **User** — כתובת המייל של המשתמש שביצע את המעבר
+- אם הטאב הזה לא קיים, הרישום פשוט מדולג בשקט (לא ישבור שום פעולה אחרת במערכת) — אבל מומלץ ליצור אותו כדי לא לאבד נתונים
+- השאירו את הטאב ריק מתחת לכותרות — המערכת תמלא אותו.
+
+## חיבור לגוגל דרייב
+הקבצים שיוצרי תוכן מעלים נשמרים בתיקיית הדרייב הזו:
+```
+https://drive.google.com/drive/folders/1Jrp_IGU5xi873QN1-EHo0qhkHv5r33Vw
+```
+המערכת יוצרת אוטומטית תת-תיקייה לכל שת"פ (לפי שם יוצר + תאריך + סניף) בתוך התיקייה הזו, ומעלה אליה את הקבצים. ודאו שהחשבון שמריץ את ה-Apps Script (Execute as: Me) הוא בעל הרשאת עריכה לתיקייה הזו.
+
+## 2. יצירת פרויקט Apps Script
+1. בתוך ה-Google Sheet: **Extensions → Apps Script**
+   (כך הסקריפט מחובר אוטומטית (container-bound) לגיליון הזה — אין צורך לציין Spreadsheet ID בקוד)
+2. מחקו את התוכן הקיים ב-`Code.gs`, והדביקו את תוכן הקובץ `Code.gs` שקיבלתם
+3. בתוך ה-Apps Script Editor: **File → New → HTML file** → תנו לו את השם **בדיוק** `Index` → הדביקו את תוכן `Index.html`
+4. שוב **File → New → HTML file** → תנו לו את השם **בדיוק** `JavaScript` → הדביקו את תוכן `JavaScript.html`
+
+⚠️ שימו לב: שמות הקבצים חייבים להיות `Index` ו-`JavaScript` (בלי הסיומת .html כשיוצרים בתוך Apps Script).
+
+## 3. Deploy כ-Web App
+1. **Deploy → New deployment**
+2. Type: **Web app**
+3. Execute as: **Me**
+4. Who has access: **Anyone within your organization** (או לפי הצורך שלכם)
+5. **Deploy** → העתיקו את ה-URL שמתקבל
+
+זהו! פתחו את ה-URL ותראו את מסך הכניסה של ASTOLIA library.
+
+## הערות
+- ההתחברות היא לפי Username (=Display Name) + Password, בהתאם למה שמוגדר בטאב Users.
+- לאחר התחברות מוצלחת, הסשן נשמר בדפדפן (localStorage) ל-30 יום — המשתמש לא יצטרך להתחבר שוב עד שיפוג.
+- יוצרי תוכן (Content Creator) יכולים ליצור פרופיל אחד בלבד ורואים רק את עצמם בטאב Digital Creator. כל כרטיס פרופיל מציג תגית Active/Inactive וספירת שת"פים לפי סטטוס (ממתינים/מאושרים/מבוטלים).
+- עורכי וידאו ואדמין רואים את כל הפרופילים, יכולים ליצור כמה שרוצים, ורק להם מוצג טאב The Library ו-Creator Partnerships. **My Experiences מוצג רק ליוצרי תוכן** — לעורך/אדמין אין גישה אליו (הניהול שלהם נעשה כולו דרך Creator Partnerships, כדי למנוע כפילות).
+- טאב **Creator Partnerships** (עורך/אדמין בלבד) כולל 3 תתי-טאבים: Partnerships (יצירה, עריכה וניהול שת"פים), Spa Branches (ניהול סניפים), Benefits Package (ניהול הטבות, כל הטבה משויכת לסוג פעילות).
+- יצירת/עריכת שת"פ: בוחרים יוצר תוכן פעיל, סניף פעיל (רשימת ההטבות מתעדכנת אוטומטית לפי מה שהסניף הזה בפועל מציע), תאריך ושעה, כמות אנשים, הטבות (multi-select מסונן), חבילת תוכן לפרסום (פוסט/ריילס/סטורי עם כמות), כמות תמונות/סרטונים גולמיים שהיוצר צריך להעלות לפלטפורמה, וזמן העלאה. שת"פ קיים (שלא בוטל) ניתן לעריכה מלאה דרך כפתור **Edit** בכרטיס.
+- **דדליין תוכן**: מחושב אוטומטית מתאריך הביקור + זמן ההעלאה שנבחר (שבוע/שבועיים/חודש), ומוצג על הכרטיס. אם עבר — מסומן באדום "Overdue". בפילטר הסטטוס יש אפשרות **Overdue** שמציגה רק שת"פים שחרגו מהדדליין (ולא בוטלו).
+- **אישור שת"פ**: יוצר התוכן מאשר עם 2 הצהרות (ביצוע + בריאות/הריון). לאחר האישור מופיע לו כפתור **Upload Content** (עד לכמות RequiredPhotos/RequiredVideos שנקבעה), וכן שורות "Done" ליד כל סוג תוכן בחבילה (פוסט/ריילס/סטורי) לסימון שפורסם בפועל.
+- **חוויית יוצר התוכן**: לאחר אישור שת"פ, כפתור **Add/Edit Experience** פותח טופס עם 3 ציוני 1-5 (הרגשה כללית, חוויה כללית, שביעות רצון מהמקום) וטקסט חופשי. המידע הזה מוצג גם לעורך/אדמין בכרטיס השת"פ ב-Creator Partnerships.
+- **טאב Admin** (Admin בלבד — לא זמין לעורך וידאו): רשימת כל המשתמשים מגיליון Users, עם תגית לכל אחד שמראה אם הושלם פרופיל Digital Creator (מבוסס על התאמת כתובת מייל בין הגיליונות). כפתור **Edit** על כל כרטיס עורך את כל השדות (שם, מייל, תפקיד, סטטוס, סיסמה — סיסמה נשארת ללא שינוי אם משאירים ריק). כפתור **+ Add User** יוצר משתמש חדש עם סיסמה בת 6 ספרות (מוגרלת אוטומטית, ניתנת לעריכה/יצירה מחדש עם כפתור Generate).
+- ברירת המחדל בפילטר של My Experiences ו-Creator Partnerships: שת"פים מהיום והלאה (לא כולל מבוטלים). ניתן לסנן גם ל-Past / Overdue / Cancelled / All, או לבחור תאריך ספציפי.
+- תאריכים מוצגים בפורמט אמריקאי MM/DD/YYYY.
+- הקבצים שמועלים נשמרים בגוגל דרייב (ראו הסעיף למעלה) ונרשמים בגיליון **Library Content**.
+- טאב **The Library** (עורך/אדמין בלבד) מציג את כל התוכן שהועלה, עם פילטרים לפי יוצר תוכן, סוג תוכן (תמונה/וידאו), סניף ספא, ותאריך. כל פריט ניתן לפתיחה ישירות בדרייב.
+- גודל קובץ מקסימלי להעלאה: 25MB לקובץ (מוגבל בצד הלקוח כדי להימנע מהעלאות שנכשלות).
