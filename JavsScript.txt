@@ -124,11 +124,13 @@
     const libraryTab = document.querySelector('.nav-item[data-tab="library"]');
     const partnershipsTab = document.querySelector('.nav-item[data-tab="partnerships"]');
     const experiencesTab = document.querySelector('.nav-item[data-tab="experiences"]');
+    const adminTab = document.querySelector('.nav-item[data-tab="admin"]');
 
     const privileged = (role === ROLES.EDITOR || role === ROLES.ADMIN);
     libraryTab.style.display = privileged ? 'flex' : 'none';
     partnershipsTab.style.display = privileged ? 'flex' : 'none';
     experiencesTab.style.display = privileged ? 'none' : 'flex';
+    adminTab.style.display = (role === ROLES.ADMIN) ? 'flex' : 'none';
 
     document.getElementById('newPartnershipBtn').classList.toggle('hidden', !privileged);
   }
@@ -155,6 +157,10 @@
     const pageEl = document.getElementById('page-' + tab);
     if (pageEl) pageEl.style.display = 'block';
 
+    if (currentToken) {
+      callServer('logTabSwitch', currentToken, tab).catch(() => {});
+    }
+
     if (tab === 'digitalCreator') {
       loadCities();
       loadCreators();
@@ -168,6 +174,9 @@
     if (tab === 'library') {
       loadLibraryFilterOptions();
       loadLibrary();
+    }
+    if (tab === 'admin') {
+      loadUsers();
     }
   }
 
@@ -1048,12 +1057,17 @@
     if (item.reels > 0) contentBits.push(item.reels + ' Reels');
     if (item.stories > 0) contentBits.push(item.stories + ' Story');
 
+    const uploadBits = [];
+    if (item.maxImages > 0) uploadBits.push(item.maxImages + ' photo' + (item.maxImages > 1 ? 's' : ''));
+    if (item.maxVideos > 0) uploadBits.push(item.maxVideos + ' video' + (item.maxVideos > 1 ? 's' : ''));
+
     document.getElementById('approveDetails').innerHTML =
       '<div class="info-row"><span>Spa branch</span><span>' + escapeHtml(item.branchName) + '</span></div>' +
       '<div class="info-row"><span>Date</span><span>' + formatDateUS(item.visitDate) + (item.visitTime ? ' · ' + escapeHtml(item.visitTime) : '') + '</span></div>' +
       '<div class="info-row"><span>People</span><span>' + escapeHtml(String(item.peopleCount)) + '</span></div>' +
       '<div class="info-row"><span>Benefits</span><span>' + escapeHtml(benefitTags.join(', ') || '—') + '</span></div>' +
       '<div class="info-row"><span>Content to deliver</span><span>' + escapeHtml(contentBits.join(', ') || '—') + '</span></div>' +
+      '<div class="info-row"><span>Raw content to upload</span><span>' + escapeHtml(uploadBits.join(', ') || '—') + '</span></div>' +
       '<div class="info-row"><span>Upload deadline</span><span>' + escapeHtml(item.uploadDeadline) + '</span></div>';
 
     document.getElementById('approveModal').dataset.partnershipId = item.id;
@@ -1309,6 +1323,99 @@
       btn.textContent = 'Upload';
       document.getElementById('uploadProgressList').innerHTML = '';
       msgEl.textContent = (err && err.message) ? err.message : 'Could not upload content.';
+    });
+  }
+
+  /* ------------------------- ADMIN: USERS ----------------------------- */
+
+  function loadUsers() {
+    const grid = document.getElementById('usersGrid');
+    grid.innerHTML = '<div class="empty-state">Loading users...</div>';
+
+    callServer('getAllUsers', currentToken).then(items => {
+      items = Array.isArray(items) ? items : [];
+      if (!items.length) {
+        grid.innerHTML = '<div class="empty-state">No users yet.</div>';
+        return;
+      }
+
+      grid.innerHTML = items.map(u => '' +
+        '<div class="creator-card">' +
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
+            '<div class="creator-name">' + escapeHtml(u.displayName) + '</div>' +
+            '<span class="status-pill ' + (u.status === 'Active' ? 'status-active' : 'status-inactive') + '">' + escapeHtml(u.status) + '</span>' +
+          '</div>' +
+          '<div class="creator-contact">' + escapeHtml(u.email) + '</div>' +
+          '<div class="tag-row">' +
+            '<span class="tag">' + escapeHtml(u.role) + '</span>' +
+            '<span class="tag" style="' + (u.profileComplete ? '' : 'opacity:.55;') + '">' + (u.profileComplete ? '✓ Profile complete' : 'No Digital Creator profile') + '</span>' +
+          '</div>' +
+          '<div class="card-footer"><button class="edit-btn" onclick=\'openUserModal(' + JSON.stringify(u).replace(/'/g, "&#39;") + ')\'>Edit</button></div>' +
+        '</div>'
+      ).join('');
+    }).catch(err => { grid.innerHTML = '<div class="empty-state">' + escapeHtml((err && err.message) ? err.message : 'Could not load users.') + '</div>'; });
+  }
+
+  function generateUserPassword() {
+    document.getElementById('uPassword').value = String(Math.floor(100000 + Math.random() * 900000));
+  }
+
+  function openUserModal(user) {
+    document.getElementById('userMsg').textContent = '';
+    document.getElementById('userModalTitle').textContent = user ? 'Edit User' : 'Add User';
+    document.getElementById('uOriginalEmail').value = user ? user.email : '';
+    document.getElementById('uDisplayName').value = user ? user.displayName : '';
+    document.getElementById('uEmail').value = user ? user.email : '';
+    document.getElementById('uRole').value = user ? user.role : 'Content Creator';
+    document.getElementById('uStatus').value = user ? user.status : 'Active';
+
+    if (user) {
+      document.getElementById('uPassword').value = '';
+      document.getElementById('uPasswordHint').textContent = '(leave blank to keep the current password)';
+    } else {
+      document.getElementById('uPassword').value = String(Math.floor(100000 + Math.random() * 900000));
+      document.getElementById('uPasswordHint').textContent = '';
+    }
+
+    document.getElementById('userModal').classList.add('active');
+  }
+
+  function closeUserModal() {
+    document.getElementById('userModal').classList.remove('active');
+  }
+
+  function handleSaveUser() {
+    const originalEmail = document.getElementById('uOriginalEmail').value;
+    const data = {
+      displayName: document.getElementById('uDisplayName').value.trim(),
+      email: document.getElementById('uEmail').value.trim(),
+      role: document.getElementById('uRole').value,
+      status: document.getElementById('uStatus').value,
+      password: document.getElementById('uPassword').value.trim()
+    };
+
+    if (!data.displayName) { document.getElementById('userMsg').textContent = 'Display name is required.'; return; }
+    if (!data.email) { document.getElementById('userMsg').textContent = 'Email is required.'; return; }
+    if (!originalEmail && !/^\d{6}$/.test(data.password)) { document.getElementById('userMsg').textContent = 'Password must be exactly 6 digits.'; return; }
+    if (data.password && !/^\d{6}$/.test(data.password)) { document.getElementById('userMsg').textContent = 'Password must be exactly 6 digits.'; return; }
+
+    const btn = document.getElementById('userSaveBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Saving...';
+
+    const action = originalEmail
+      ? callServer('updateUser', currentToken, originalEmail, data)
+      : callServer('createUser', currentToken, data);
+
+    action.then(() => {
+      btn.disabled = false;
+      btn.textContent = 'Save User';
+      closeUserModal();
+      loadUsers();
+    }).catch(err => {
+      btn.disabled = false;
+      btn.textContent = 'Save User';
+      document.getElementById('userMsg').textContent = (err && err.message) ? err.message : 'Could not save user.';
     });
   }
 
