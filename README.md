@@ -15,7 +15,7 @@ https://tinyurl.com/ASTOLIA
 ### כניסה לפי תפקיד
 
 **יוצר תוכן (Content Creator)**
-1. נכנסים עם Username (=Display Name) וסיסמה שקיבלתם מהאדמין
+1. נכנסים עם Username (=Display Name) וסיסמה
 2. בטאב **Digital Creator** — לוחצים "+ Create Profile" וממלאים פרטים אישיים (שם, טלפון, עיר, קישורים לרשתות). ניתן ליצור פרופיל **אחד בלבד**
 3. בטאב **My Experiences** רואים הצעות שת"פ חדשות (סטטוס Pending Approval) — לוחצים "Review & Approve", מסמנים 2 ההצהרות (ביצוע + בריאות), ומאשרים
 4. אחרי אישור מופיע כפתור **Upload Content** — מעלים את כמות התמונות/הסרטונים הנדרשת
