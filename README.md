@@ -1,3 +1,12 @@
+כניסה למערכת הפעילה בקישור הבא:
+https://tinyurl.com/ASTOLIA
+
+יוזרים כניסה למערכת
+אדמין: David Popovich , סיסמא: 446699
+עורך וידאו: Emily Carte , סיסמא: 444477
+יוצר תוכן: Dora Onskates , סיסמא 223344 
+
+
 # ASTOLIA library — מדריך הפעלה ושימוש
 
 ---
