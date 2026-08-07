@@ -9,6 +9,7 @@ const BRANCHES_SHEET     = 'Spa Branches';
 const BENEFITS_SHEET     = 'Benefits';
 const PARTNERSHIPS_SHEET = 'Partnerships';
 const LIBRARY_SHEET      = 'Library Content';
+const ACTIVITY_LOG_SHEET = 'Activity_Log';
 
 const LIBRARY_DRIVE_FOLDER_ID = '1Jrp_IGU5xi873QN1-EHo0qhkHv5r33Vw';
 
@@ -152,6 +153,12 @@ function isPrivileged(user) {
 function requirePrivileged(token) {
   const user = requireSession(token);
   if (!isPrivileged(user)) throw new Error('You do not have permission to perform this action.');
+  return user;
+}
+
+function requireAdmin(token) {
+  const user = requireSession(token);
+  if (user.role !== ROLES.ADMIN) throw new Error('Admin access required.');
   return user;
 }
 
@@ -1235,4 +1242,114 @@ function getLibraryContent(token, filters) {
     aiKeywords: String(it['AI Keywords'] || ''),
     aiStatus: String(it['AI Analysis Status'] || '')
   }));
+}
+
+/*******************  ADMIN — USER MANAGEMENT  **********/
+// Users sheet columns: Email | Display Name | Role | Status | Password
+// (Admin only — Video Editor cannot access this)
+
+function getAllUsers(token) {
+  requireAdmin(token);
+
+  const users = sheetToObjects(getSheet(USERS_SHEET));
+  const profiles = sheetToObjects(getSheet(CREATORS_SHEET));
+
+  const profileEmails = {};
+  profiles.forEach(p => {
+    const email = String(p.Email || '').trim().toLowerCase();
+    if (email) profileEmails[email] = true;
+  });
+
+  return users.map(u => ({
+    email: u.Email || '',
+    displayName: u['Display Name'] || '',
+    role: u.Role || '',
+    status: u.Status || 'Active',
+    profileComplete: !!profileEmails[String(u.Email || '').trim().toLowerCase()]
+  })).sort((a, b) => String(a.displayName).localeCompare(String(b.displayName)));
+}
+
+function createUser(token, data) {
+  requireAdmin(token);
+  data = data || {};
+
+  if (!data.displayName || !String(data.displayName).trim()) throw new Error('Display name is required.');
+  if (!data.email || !String(data.email).trim()) throw new Error('Email is required.');
+  if (!/^\d{6}$/.test(String(data.password || '').trim())) throw new Error('Password must be exactly 6 digits.');
+  if ([ROLES.CREATOR, ROLES.EDITOR, ROLES.ADMIN].indexOf(data.role) === -1) throw new Error('Please select a valid role.');
+
+  const sheet = getSheet(USERS_SHEET);
+  const existing = sheetToObjects(sheet);
+
+  const emailLower = String(data.email).trim().toLowerCase();
+  if (existing.some(u => String(u.Email || '').trim().toLowerCase() === emailLower)) {
+    throw new Error('A user with this email already exists.');
+  }
+  const nameLower = String(data.displayName).trim().toLowerCase();
+  if (existing.some(u => String(u['Display Name'] || '').trim().toLowerCase() === nameLower)) {
+    throw new Error('A user with this display name already exists.');
+  }
+
+  sheet.appendRow([
+    data.email.trim(),
+    data.displayName.trim(),
+    data.role,
+    data.status === 'Inactive' ? 'Inactive' : 'Active',
+    String(data.password).trim()
+  ]);
+
+  return { success: true };
+}
+
+function updateUser(token, originalEmail, data) {
+  requireAdmin(token);
+  data = data || {};
+
+  if (!data.displayName || !String(data.displayName).trim()) throw new Error('Display name is required.');
+  if (!data.email || !String(data.email).trim()) throw new Error('Email is required.');
+  if (data.password && !/^\d{6}$/.test(String(data.password).trim())) throw new Error('Password must be exactly 6 digits.');
+  if ([ROLES.CREATOR, ROLES.EDITOR, ROLES.ADMIN].indexOf(data.role) === -1) throw new Error('Please select a valid role.');
+
+  const sheet = getSheet(USERS_SHEET);
+  const items = sheetToObjects(sheet);
+  const target = items.find(u => String(u.Email || '').trim().toLowerCase() === String(originalEmail || '').trim().toLowerCase());
+  if (!target) throw new Error('User not found.');
+
+  const newEmailLower = String(data.email).trim().toLowerCase();
+  if (newEmailLower !== String(originalEmail || '').trim().toLowerCase()) {
+    const conflict = items.some(u => String(u.Email || '').trim().toLowerCase() === newEmailLower);
+    if (conflict) throw new Error('Another user already uses this email.');
+  }
+
+  const row = target._row;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  function setCell(col, value) {
+    const c = headers.indexOf(col) + 1;
+    if (c > 0) sheet.getRange(row, c).setValue(value);
+  }
+
+  setCell('Display Name', data.displayName.trim());
+  setCell('Email', data.email.trim());
+  setCell('Role', data.role);
+  setCell('Status', data.status === 'Inactive' ? 'Inactive' : 'Active');
+  if (data.password) setCell('Password', String(data.password).trim());
+
+  return { success: true };
+}
+
+/*******************  ACTIVITY LOG  **********************/
+// Activity_Log sheet columns: Timestamp | User | Tab
+// Logs every top-level tab switch. Never blocks navigation if it fails —
+// e.g. if the sheet hasn't been created yet.
+
+function logTabSwitch(token, tabName) {
+  try {
+    const user = validateSession(token);
+    if (!user) return { success: true };
+    const sheet = getSheet(ACTIVITY_LOG_SHEET);
+    sheet.appendRow([new Date(), user.email, String(tabName || '')]);
+  } catch (e) {
+    // logging is best-effort only
+  }
+  return { success: true };
 }
