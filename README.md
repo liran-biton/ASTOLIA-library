@@ -12,16 +12,6 @@ https://tinyurl.com/ASTOLIA
 ---
 
 ## 🇮🇱 עברית
-
-### הפעלת המערכת (פעם אחת)
-
-1. **גיליון Google Sheets** — צרו קובץ חדש עם 7 טאבים: `Users`, `Digital Creator`, `Spa Branches`, `Benefits`, `Partnerships`, `Library Content`, `Activity_Log`. הדביקו בכל אחד את שורת הכותרות המדויקת (מפורט ב-README).
-2. **Apps Script** — בתוך הגיליון: **Extensions → Apps Script**. הדביקו את `Code.gs`, ואת שני קבצי ה-HTML (בשמות מדויקים **Index** ו-**JavaScript**).
-3. **הרשאות** — הריצו פעם אחת פונקציה כלשהי שמשתמשת ב-Drive וב-`UrlFetchApp` (למשל דרך כפתור Run בעורך) ואשרו את כל ההרשאות המבוקשות (Drive + External requests).
-4. **מפתח AI** — ב-**Project Settings → Script Properties** הוסיפו `ANTHROPIC_API_KEY` עם המפתח שלכם.
-5. **Deploy** — **Deploy → New deployment** → Web app → Execute as: **Me** → Who has access: לפי הצורך → Deploy. העתיקו את ה-URL שמתקבל — זה כתובת האפליקציה.
-6. **משתמש ראשון** — הוסיפו ידנית שורה בגיליון `Users` עם Role=`Admin` ו-Status=`Active`, כדי שתהיה לכם דרך כניסה ראשונה. את שאר המשתמשים אפשר להוסיף אחר כך דרך טאב Admin באפליקציה עצמה.
-
 ### כניסה לפי תפקיד
 
 **יוצר תוכן (Content Creator)**
@@ -46,15 +36,6 @@ https://tinyurl.com/ASTOLIA
 ---
 
 ## 🇬🇧 English
-
-### First-time setup
-
-1. **Google Sheet** — create a new spreadsheet with 7 tabs: `Users`, `Digital Creator`, `Spa Branches`, `Benefits`, `Partnerships`, `Library Content`, `Activity_Log`. Paste the exact header row into each (full details in README).
-2. **Apps Script** — inside the sheet: **Extensions → Apps Script**. Paste `Code.gs`, plus the two HTML files (named exactly **Index** and **JavaScript**).
-3. **Permissions** — run any function that uses Drive and `UrlFetchApp` once (e.g. via the Run button in the editor) and approve all requested permissions (Drive + External requests).
-4. **AI key** — under **Project Settings → Script Properties**, add `ANTHROPIC_API_KEY` with your key.
-5. **Deploy** — **Deploy → New deployment** → Web app → Execute as: **Me** → Who has access: as needed → Deploy. Copy the resulting URL — that's your app's address.
-6. **First user** — manually add a row in the `Users` sheet with Role=`Admin` and Status=`Active`, so you have an initial way in. Every other user can then be added from the Admin tab inside the app itself.
 
 ### Logging in by role
 
